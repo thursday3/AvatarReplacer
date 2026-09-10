@@ -1,0 +1,97 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <AssemblyName>AvatarReplacer</AssemblyName>
+    <Description>Avatar Replacer Mod for Lethal Fantasy</Description>
+    <Version>5.0.0</Version>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+	
+	<!-- Replace this with your actual game folder, or pass it with -p:GameDir="..." -->
+    <GameDir Condition="'$(GameDir)' == '' and '$(LF_GAME_DIR)' != ''">$(LF_GAME_DIR)</GameDir>
+    <GameDir Condition="'$(GameDir)' == ''">C:\PUT_YOUR_GAME_PATH_HERE</GameDir>
+    <ManagedDir>$(GameDir)\LethalFantasy_Data\Managed</ManagedDir>
+    <BepInExCoreDir Condition="'$(BepInExCoreDir)' == ''">$(GameDir)\BepInEx\core</BepInExCoreDir>
+    <BepInExCoreDir Condition="'$(BepInExCoreDir)' != '' and !Exists('$(BepInExCoreDir)\\BepInEx.dll') and Exists('$(LegacyBepInExCoreDir)\\BepInEx.dll')">$(LegacyBepInExCoreDir)</BepInExCoreDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx">
+      <HintPath>$(BepInExCoreDir)\BepInEx.dll</HintPath>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(BepInExCoreDir)\0Harmony.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.AssetBundleModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.AnimationModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.InputLegacyModule">
+      <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.InputModule">
+      <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.InputModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine.JSONSerializeModule">
+      <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.JSONSerializeModule.dll</HintPath>
+    </Reference>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(GameDir)\LethalFantasy_Data\Managed\Assembly-CSharp.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <LilToonBundlePath Condition="'$(LilToonBundlePath)' == '' and Exists('$(MSBuildThisFileDirectory)RuntimeShaders\liltoonshader')">$(MSBuildThisFileDirectory)RuntimeShaders\liltoonshader</LilToonBundlePath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="VRM10">
+      <HintPath>lib\VRM10.dll</HintPath>
+    </Reference>
+    <Reference Include="UniGLTF">
+      <HintPath>lib\UniGLTF.dll</HintPath>
+    </Reference>
+    <Reference Include="UniGLTF.Utils">
+      <HintPath>lib\UniGLTF.Utils.dll</HintPath>
+    </Reference>
+    <Reference Include="UniHumanoid">
+      <HintPath>lib\UniHumanoid.dll</HintPath>
+    </Reference>
+    <Reference Include="VRM">
+      <HintPath>lib\VRM.dll</HintPath>
+    </Reference>
+    <Reference Include="MToon">
+      <HintPath>lib\MToon.dll</HintPath>
+    </Reference>
+    <Reference Include="VrmLib">
+      <HintPath>lib\VrmLib.dll</HintPath>
+    </Reference>
+    <Reference Include="VRM10.MToon10">
+      <HintPath>lib\VRM10.MToon10.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(LilToonBundlePath)' != '' and Exists('$(LilToonBundlePath)')">
+    <EmbeddedResource Include="$(LilToonBundlePath)" LogicalName="AvatarReplacer.Resources.liltoonshader" />
+  </ItemGroup>
+
+  <Target Name="ReportEmbeddedLilToonBundle" BeforeTargets="CoreCompile">
+    <Message Importance="High" Text="[AvatarReplacer] Embedded lilToon bundle: $(LilToonBundlePath)" Condition="'$(LilToonBundlePath)' != '' and Exists('$(LilToonBundlePath)')" />
+    <Warning Text="[AvatarReplacer] lilToon AssetBundle was not found at $(LilToonBundlePath). The DLL will build without the embedded shader bundle." Condition="'$(LilToonBundlePath)' != '' and !Exists('$(LilToonBundlePath)')" />
+  </Target>
+</Project>

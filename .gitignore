@@ -1,0 +1,48 @@
+# Build output
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+build/
+dist/
+out/
+*.bat
+*.cmd
+# Generated runtime shader bundle output
+RuntimeShaders/
+
+# Common mod / compiled artifacts
+*.dll
+*.exe
+*.zip
+*.7z
+*.rar
+*.bundle
+*.asset
+*.meta
+*.pdb
+*.cache
+*.obj
+*.bin
+
+# VS / IDE
+.vs/
+.vscode/
+*.user
+*.suo
+*.userprefs
+*.rsuser
+*.pidb
+*.booproj
+*.svd
+*.db
+*.db-shm
+*.db-wal
+
+# Local logs and crash dumps
+*.log
+*.dmp
+Thumbs.db
+.DS_Store
+
+

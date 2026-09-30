@@ -54,6 +54,8 @@ namespace AvatarReplacer
         private Quaternion leftEyeRest;
         private Quaternion rightEyeRest;
         private bool useEyeBoneFallback;
+        private Component vrm0LookAt;
+        private MethodInfo vrm0SetLookAtYawPitch;
 
         public void Initialize(Giantess giantess, IVrmHeadAdapter headAdapter, IVrmExpressionAdapter expressionAdapter)
         {
@@ -61,6 +63,15 @@ namespace AvatarReplacer
             this.headAdapter = headAdapter;
             this.expressionAdapter = expressionAdapter;
             this.vrm10Instance = GetComponent<Vrm10Instance>() ?? GetComponentInChildren<Vrm10Instance>(true);
+            // Legacy VRM 0.x look-at: reflection keeps this version-proof against
+            // whatever UniVRM build ships in lib/VRM.dll.
+            var vrm0Type = System.Type.GetType("VRM.VRMLookAtHead, VRM") ?? typeof(Vrm10Instance).Assembly.GetType("VRM.VRMLookAtHead");
+            if (vrm0Type != null)
+            {
+                vrm0LookAt = GetComponent(vrm0Type) ?? GetComponentInChildren(vrm0Type, true);
+                if (vrm0LookAt != null)
+                    vrm0SetLookAtYawPitch = vrm0Type.GetMethod("SetLookAtYawPitch", BindingFlags.Public | BindingFlags.Instance);
+            }
 
             if (expressionAdapter == null)
             {
@@ -146,7 +157,10 @@ namespace AvatarReplacer
 
         void LateUpdate()
         {
-            if (giantess == null || giantess.attentionManager == null || expressionAdapter == null || headAdapter == null || headAdapter.Head == null) return;
+            // Note: giantess.attentionManager is frequently still null at Initialize
+            // time (game assigns it late), so the target is re-resolved HERE every
+            // frame instead of hard-failing when init ran too early.
+            if (giantess == null || expressionAdapter == null || headAdapter == null || headAdapter.Head == null) return;
 
             Vector3 playerTarget;
             if (giantess.attentionManager != null && giantess.attentionManager.attentionEyeTransform != null)
@@ -216,8 +230,8 @@ namespace AvatarReplacer
 
         private void TryApplyVrm10LookAt(float yawDeg, float pitchDeg)
         {
-            if (vrm10Instance == null || vrm10Instance.Runtime?.LookAt == null) return;
-            object lookAt = vrm10Instance.Runtime.LookAt;
+            if (vrm10Instance == null) return;
+            object lookAt = vrm10Instance.Runtime?.LookAt;
             if (lookAt == null) return;
             if (!vrm10LookAtChecked)
             {
@@ -231,10 +245,27 @@ namespace AvatarReplacer
             {
                 try
                 {
-                    setLookAtYawPitchMethod.Invoke(lookAt, new object[] { yawDeg * Mathf.Deg2Rad, pitchDeg * Mathf.Deg2Rad });
+                    // UniVRM10 accepts DEGREES here and converts internally.
+                    // The previous code multiplied by Deg2Rad, feeding degree-valued
+                    // radians (max ~1 rad instead of ~60 deg) which collapsed VRM1
+                    // gaze to almost zero movement.
+                    setLookAtYawPitchMethod.Invoke(lookAt, new object[] { yawDeg, pitchDeg });
                 }
                 catch (System.Exception) {  }
             }
+        }
+
+        private void TryApplyVrm0LookAt(float yawDeg, float pitchDegUp)
+        {
+            if (vrm0LookAt == null || vrm0SetLookAtYawPitch == null) return;
+            try
+            {
+                // Legacy VRMLookAtHead expects radians and a down-positive pitch
+                // (the convention this class originally computed). Our smoothPitch
+                // is up-positive, so negate before passing it on.
+                vrm0SetLookAtYawPitch.Invoke(vrm0LookAt, new object[] { yawDeg * Mathf.Deg2Rad, -pitchDegUp * Mathf.Deg2Rad });
+            }
+            catch (System.Exception) { }
         }
 
         private void ApplyManualEyeMovement()
@@ -245,8 +276,11 @@ namespace AvatarReplacer
             Vector3 directionToTarget = (currentLookTarget - head.position).normalized;
             Vector3 localDirection = head.InverseTransformDirection(directionToTarget);
 
+            // Conventions used throughout this class:
+            //   yaw   positive = target is to the avatar's RIGHT
+            //   pitch positive = target is ABOVE the head (up-positive)
             float targetYaw = Mathf.Atan2(localDirection.x, localDirection.z) * Mathf.Rad2Deg;
-            float targetPitch = -Mathf.Asin(localDirection.y) * Mathf.Rad2Deg;
+            float targetPitch = Mathf.Asin(Mathf.Clamp(localDirection.y, -1f, 1f)) * Mathf.Rad2Deg;
 
             targetYaw = Mathf.Clamp(targetYaw, -MAX_YAW_ANGLE, MAX_YAW_ANGLE);
             targetPitch = Mathf.Clamp(targetPitch, -MAX_PITCH_ANGLE, MAX_PITCH_ANGLE);
@@ -255,6 +289,7 @@ namespace AvatarReplacer
             smoothPitch = Mathf.Lerp(smoothPitch, targetPitch, Time.deltaTime * EYE_SMOOTH_SPEED);
 
             TryApplyVrm10LookAt(smoothYaw, smoothPitch);
+            TryApplyVrm0LookAt(smoothYaw, smoothPitch);
 
             bool shouldLog = AvatarReplacerPlugin.IsDebugEnabled && (Time.frameCount % 300 == 0);
 
@@ -284,6 +319,9 @@ namespace AvatarReplacer
                 if (HasLookRight()) SetWeight(lookRightKey, lookRightString, 0f);
             }
 
+            // smoothPitch is up-positive: target above head => LookUp.
+            // The previous code mapped positive pitch to LookUp while computing
+            // pitch as down-positive, so vertical gaze was fully inverted.
             if (smoothPitch > 0)
             {
                 float weight = Mathf.Clamp01((smoothPitch / MAX_PITCH_ANGLE) * SENSITIVITY);
@@ -312,6 +350,8 @@ namespace AvatarReplacer
 
             if (useEyeBoneFallback && leftEyeBone != null && rightEyeBone != null)
             {
+                // smoothPitch is up-positive; Unity's positive X rotation pitches
+                // DOWN, so negate here. Yaw stays as-is (positive Y = turn right).
                 Quaternion rot = Quaternion.Euler(-smoothPitch, smoothYaw, 0f);
                 leftEyeBone.localRotation = leftEyeRest * rot;
                 rightEyeBone.localRotation = rightEyeRest * rot;

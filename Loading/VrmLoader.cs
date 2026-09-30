@@ -209,6 +209,29 @@ namespace AvatarReplacer
             var vectors = new Dictionary<string, Vector4>();
             var actions = new List<Action<Material>>();
 
+            // glTF transparency: the game shader is opaque by default. Overlay
+            // planes (blush/tear/sweat, the "*_trans" materials) MUST render
+            // transparently or they show as solid rectangles — this caused the
+            // "red mask" face during the grow behaviour, where Hurt raises the
+            // avatar's own tear/blush overlay blendshapes and textures.
+            string alphaMode = (src != null && !string.IsNullOrEmpty(src.alphaMode))
+                ? src.alphaMode.ToUpperInvariant() : "OPAQUE";
+            // Name heuristic: many VRMs (and the game itself) use a "_trans" suffix
+            // for transparent overlay materials (blush/tear planes). Some exporters
+            // omit glTF alphaMode, so treat OPAQUE *_trans materials as BLEND.
+            if (alphaMode == "OPAQUE" && name.IndexOf("trans", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                alphaMode = "BLEND";
+                ModLog.Debug($"VRM material '{name}' has no alphaMode but its name marks it transparent; treating as BLEND.");
+            }
+            Shader effectiveShader = ResolveShaderForAlphaMode(shader, alphaMode, name);
+            if (effectiveShader == shader && alphaMode != "OPAQUE")
+            {
+                // No dedicated transparent shader available: at least raise the
+                // render queue and try alpha keywords on the base shader.
+                ApplyAlphaModeFallback(shader, alphaMode, actions);
+            }
+
             if (src.pbrMetallicRoughness != null)
             {
                 float[] values = src.pbrMetallicRoughness.baseColorFactor;
@@ -231,11 +254,13 @@ namespace AvatarReplacer
                 if (tex != null && tex.index >= 0 &&
                     GltfPbrTextureImporter.TryBaseColorTexture(data, src, out _, out var descriptor))
                 {
-                    // Support both Built-in Standard-style and common custom-game
-                    // texture property names. UniGLTF ignores properties the shader
-                    // does not expose.
-                    textures["_MainTex"] = descriptor;
-                    textures["_BaseMap"] = descriptor;
+                    // Only register texture slots the effective shader actually
+                    // exposes. Writing an unknown property (e.g. _MainTex on the
+                    // game's KiriToon/Giantess, which uses _BaseMap) makes Unity
+                    // log an error for every material on every load.
+                    if (ShaderHasTextureSlot(effectiveShader, "_MainTex")) textures["_MainTex"] = descriptor;
+                    if (ShaderHasTextureSlot(effectiveShader, "_BaseMap")) textures["_BaseMap"] = descriptor;
+                    if (ShaderHasTextureSlot(effectiveShader, "_BaseColorMap")) textures["_BaseColorMap"] = descriptor;
                 }
             }
             else
@@ -248,13 +273,100 @@ namespace AvatarReplacer
             // emission, skin colour, or any other VRM/game material feature here.
             return new MaterialDescriptor(
                 name,
-                shader,
+                effectiveShader,
                 null,
                 textures,
                 floats,
                 colors,
                 vectors,
                 actions);
+        }
+
+        private UnityEngine.Material shaderProbe;
+
+        /// <summary>
+        /// Capability probe for a shader's texture slots. Uses a temporary
+        /// Material because Material.HasProperty is stable across Unity module
+        /// layouts, while Shader.HasProperty is not always present.
+        /// </summary>
+        private bool ShaderHasTextureSlot(Shader shader, string propertyName)
+        {
+            try
+            {
+                if (shaderProbe == null || shaderProbe.shader != shader)
+                {
+                    if (shaderProbe != null) UnityEngine.Object.Destroy(shaderProbe);
+                    shaderProbe = new UnityEngine.Material(shader) { hideFlags = UnityEngine.HideFlags.HideAndDontSave };
+                }
+                return shaderProbe.HasProperty(propertyName);
+            }
+            catch
+            {
+                return true; // be permissive: worst case UniGLTF writes a harmless extra slot
+            }
+        }
+
+        private Shader transparentShaderCache;
+        private bool transparentShaderResolved;
+
+        /// <summary>
+        /// MASK/BLEND materials get a shader that actually supports transparency.
+        /// The game ships KiriToon/Transparent Uber (verified loaded at runtime);
+        /// forcing those materials onto the opaque KiriToon/Giantess shader is
+        /// what rendered blush/tear overlay planes as solid colored rectangles.
+        /// </summary>
+        private Shader ResolveShaderForAlphaMode(Shader opaqueShader, string alphaMode, string materialName)
+        {
+            if (alphaMode == "OPAQUE") return opaqueShader;
+
+            if (!transparentShaderResolved)
+            {
+                transparentShaderResolved = true;
+                transparentShaderCache = VrmShaderCatalog.Find("KiriToon/Transparent Uber");
+                if (transparentShaderCache == null)
+                {
+                    foreach (Shader s in VrmShaderCatalog.GetLoadedShaders())
+                    {
+                        if (s.name.IndexOf("Transparent", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            transparentShaderCache = s;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (transparentShaderCache != null)
+            {
+                ModLog.Debug($"VRM material '{materialName}' alphaMode={alphaMode} -> {transparentShaderCache.name}");
+                return transparentShaderCache;
+            }
+
+            ModLog.Warning($"VRM material '{materialName}' is {alphaMode} but no transparent shader is loaded; it may render as a solid overlay.");
+            return opaqueShader;
+        }
+
+        /// <summary>
+        /// Fallback when only the opaque shader is available: raise the render
+        /// queue and try common alpha keywords. Guarded so shaders without these
+        /// properties/keywords never log errors.
+        /// </summary>
+        private static void ApplyAlphaModeFallback(Shader shader, string alphaMode, List<Action<Material>> actions)
+        {
+            bool isMask = alphaMode == "MASK";
+            actions.Add(mat =>
+            {
+                try
+                {
+                    mat.renderQueue = isMask
+                        ? (int)UnityEngine.Rendering.RenderQueue.AlphaTest   // 2450
+                        : (int)UnityEngine.Rendering.RenderQueue.Transparent; // 3000
+                    mat.EnableKeyword(isMask ? "_ALPHATEST_ON" : "_ALPHABLEND_ON");
+                    if (!isMask && mat.HasProperty("_Surface")) mat.SetFloat("_Surface", 1f);
+                    if (mat.HasProperty("_Cutoff") && isMask) mat.SetFloat("_Cutoff", 0.5f);
+                }
+                catch { /* shader variant without these properties/keywords */ }
+            });
         }
 
         public MaterialDescriptor GetGltfDefault(string materialName = null)

@@ -27,22 +27,30 @@ namespace AvatarReplacer
             float stiffness,
             float gravityPower,
             float drag,
-            bool debug)
+            bool debug,
+            bool allowOnAvatarsWithBones = false)
         {
             if (vrmRoot == null) return;
 
-            foreach (var comp in vrmRoot.GetComponentsInChildren<Component>(true))
+            // Keyword-guessed springs can grab chains near the head/body and visibly
+            // deform an avatar, so generation is opt-in per avatar state. When
+            // allowOnAvatarsWithBones is set the user explicitly wants extra chains
+            // even on avatars that already have VRM spring bones.
+            if (!allowOnAvatarsWithBones)
             {
-                if (comp != null && comp.GetType().Name.IndexOf("SpringBone", StringComparison.OrdinalIgnoreCase) >= 0)
+                foreach (var comp in vrmRoot.GetComponentsInChildren<Component>(true))
+                {
+                    if (comp != null && comp.GetType().Name.IndexOf("SpringBone", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        return;
+                    }
+                }
+
+                var vrm10 = vrmRoot.GetComponent<Vrm10Instance>() ?? vrmRoot.GetComponentInChildren<Vrm10Instance>(true);
+                if (vrm10 != null && HasVrm10SpringBones(vrm10))
                 {
                     return;
                 }
-            }
-
-            var vrm10 = vrmRoot.GetComponent<Vrm10Instance>() ?? vrmRoot.GetComponentInChildren<Vrm10Instance>(true);
-            if (vrm10 != null && HasVrm10SpringBones(vrm10))
-            {
-                return;
             }
 
             var keywords = ParseKeywords(keywordCsv);

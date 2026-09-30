@@ -14,6 +14,7 @@ namespace AvatarReplacer
         void ImmediatelySetValue(string key, float value);
         IEnumerable<string> GetClipNames();
         bool HasClip(BlendShapePreset preset);
+        bool HasClip(string key);
     }
 
     public class Vrm0ExpressionAdapter : IVrmExpressionAdapter
@@ -47,6 +48,14 @@ namespace AvatarReplacer
              if (_proxy.BlendShapeAvatar == null || _proxy.BlendShapeAvatar.Clips == null) return false;
              return _proxy.BlendShapeAvatar.Clips.Any(c => c.Preset == preset);
         }
+
+        public bool HasClip(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return false;
+            if (_proxy.BlendShapeAvatar == null || _proxy.BlendShapeAvatar.Clips == null) return false;
+            return _proxy.BlendShapeAvatar.Clips.Any(c =>
+                string.Equals(c.BlendShapeName, key, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     public class Vrm1ExpressionAdapter : IVrmExpressionAdapter
@@ -63,10 +72,21 @@ namespace AvatarReplacer
             if (_instance?.Runtime?.Expression == null) return;
 
             var key = MapPresetToVrm1Key(preset);
-            if (key != null)
+            if (key == null) return;
+
+            if (HasExactKey(key.Value))
             {
                 _instance.Runtime.Expression.SetWeight(key.Value, value);
+                return;
             }
+
+            // Some VRM 1.0 exporters store standard expressions ("happy",
+            // "blink", ...) under the *custom* preset. Fall back to the
+            // custom-named key when the standard one does not exist, otherwise
+            // those expressions silently never apply.
+            var customKey = new ExpressionKey(ExpressionPreset.custom, key.Value.Name);
+            if (HasExactKey(customKey))
+                _instance.Runtime.Expression.SetWeight(customKey, value);
         }
 
         public void ImmediatelySetValue(string key, float value)
@@ -83,12 +103,42 @@ namespace AvatarReplacer
             _instance.Runtime.Expression.SetWeight(expressionKey, value);
         }
 
+        public bool HasClip(string key)
+        {
+            if (_instance?.Runtime?.Expression?.ExpressionKeys == null || string.IsNullOrEmpty(key)) return false;
+
+            var presetKey = MapStringToPresetKey(key);
+            if (presetKey != null)
+            {
+                return _instance.Runtime.Expression.ExpressionKeys.Any(k =>
+                    k.Preset == presetKey.Value.Preset &&
+                    string.Equals(k.Name, presetKey.Value.Name, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return _instance.Runtime.Expression.ExpressionKeys.Any(k =>
+                k.Preset == ExpressionPreset.custom &&
+                string.Equals(k.Name, key, StringComparison.OrdinalIgnoreCase));
+        }
+
         private ExpressionKey? MapStringToPresetKey(string key)
         {
             if (string.IsNullOrEmpty(key)) return null;
             var k = key.Trim().ToLowerInvariant();
             switch (k)
             {
+                // VRM 0.x-style preset names that UniVRM10 exposes as standard keys.
+                // Without these, a clip name like "happy" would be treated as a
+                // *custom* key and silently miss the avatar's happy preset.
+                case "neutral": return new ExpressionKey(ExpressionPreset.neutral);
+                case "happy": return new ExpressionKey(ExpressionPreset.happy);
+                case "angry": return new ExpressionKey(ExpressionPreset.angry);
+                case "sad": return new ExpressionKey(ExpressionPreset.sad);
+                case "relaxed": return new ExpressionKey(ExpressionPreset.relaxed);
+                case "aa": return new ExpressionKey(ExpressionPreset.aa);
+                case "ih": return new ExpressionKey(ExpressionPreset.ih);
+                case "ou": return new ExpressionKey(ExpressionPreset.ou);
+                case "ee": return new ExpressionKey(ExpressionPreset.ee);
+                case "oh": return new ExpressionKey(ExpressionPreset.oh);
                 case "lookleft": case "look_left": return new ExpressionKey(ExpressionPreset.lookLeft);
                 case "lookright": case "look_right": return new ExpressionKey(ExpressionPreset.lookRight);
                 case "lookup": case "look_up": return new ExpressionKey(ExpressionPreset.lookUp);
@@ -114,7 +164,15 @@ namespace AvatarReplacer
             var key = MapPresetToVrm1Key(preset);
             if (key == null) return false;
             return _instance.Runtime.Expression.ExpressionKeys.Any(k =>
-                k.Preset == key.Value.Preset && string.Equals(k.Name, key.Value.Name, StringComparison.OrdinalIgnoreCase));
+                (k.Preset == key.Value.Preset || k.Preset == ExpressionPreset.custom) &&
+                string.Equals(k.Name, key.Value.Name, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private bool HasExactKey(ExpressionKey key)
+        {
+            if (_instance?.Runtime?.Expression?.ExpressionKeys == null) return false;
+            return _instance.Runtime.Expression.ExpressionKeys.Any(k =>
+                k.Preset == key.Preset && string.Equals(k.Name, key.Name, StringComparison.OrdinalIgnoreCase));
         }
 
         private ExpressionKey? MapPresetToVrm1Key(BlendShapePreset preset)
@@ -145,19 +203,17 @@ namespace AvatarReplacer
     }
 
     public class CompositeVrmExpressionAdapter : IVrmExpressionAdapter
-    {
-        private readonly IVrmExpressionAdapter _primary;
-        private readonly VrmMeshBlendshapeAdapter _meshFallback;
-        private readonly VrmMeshExpressionApplicator _meshApplicator;
-        private readonly bool _primaryHasClips;
+        {
+            private readonly IVrmExpressionAdapter _primary;
+            private readonly VrmMeshBlendshapeAdapter _meshFallback;
+            private readonly VrmMeshExpressionApplicator _meshApplicator;
+
 
         public CompositeVrmExpressionAdapter(IVrmExpressionAdapter primary, VrmMeshBlendshapeAdapter meshFallback, VrmMeshExpressionApplicator meshApplicator = null)
         {
             _primary = primary;
             _meshFallback = meshFallback;
             _meshApplicator = meshApplicator;
-            var primaryNames = primary?.GetClipNames().ToList() ?? new List<string>();
-            _primaryHasClips = primaryNames.Count > 0;
         }
 
         public IEnumerable<string> GetClipNames()
@@ -175,32 +231,54 @@ namespace AvatarReplacer
                    (_meshFallback != null && _meshFallback.HasClip(preset));
         }
 
+        public bool HasClip(string key)
+        {
+            if (string.IsNullOrEmpty(key)) return false;
+            return (_primary != null && _primary.HasClip(key)) ||
+                   (_meshFallback != null && _meshFallback.HasClip(key));
+        }
+
         public void ImmediatelySetValue(BlendShapePreset preset, float value)
         {
-            if (_primary != null && _primary.HasClip(preset))
+            // Route to exactly ONE backend. Previously the VRM expression clip AND
+            // the raw mesh blendshape(s) it drives were both written every frame;
+            // the two writes race (last writer wins), producing stacked, flickering
+            // or plainly wrong faces. Only fall through to the mesh when the
+            // primary backend cannot represent this expression.
+            bool primaryHas = _primary != null && _primary.HasClip(preset);
+            if (primaryHas)
+            {
                 _primary.ImmediatelySetValue(preset, value);
+                return;
+            }
 
             if (_meshApplicator != null && _meshFallback != null)
                 _meshApplicator.Queue(PresetToStandardKey(preset), value);
-            else if (_meshFallback != null && !_primaryHasClips)
+            else if (_meshFallback != null)
                 _meshFallback.ImmediatelySetValue(PresetToStandardKey(preset), value);
         }
 
         public void ImmediatelySetValue(string key, float value)
         {
-            if (_primaryHasClips && _primary != null)
+            if (string.IsNullOrEmpty(key)) return;
+
+            bool primaryHas = _primary != null && _primary.HasClip(key);
+            if (primaryHas)
             {
                 _primary.ImmediatelySetValue(key, value);
-                if (_meshApplicator != null && _meshFallback != null)
-                    _meshApplicator.Queue(NormalizeKey(key), value);
                 return;
             }
+
             if (_meshFallback != null)
             {
                 if (_meshApplicator != null)
                     _meshApplicator.Queue(NormalizeKey(key), value);
                 else
                     _meshFallback.ImmediatelySetValue(key, value);
+            }
+            else if (_primary != null)
+            {
+                _primary.ImmediatelySetValue(key, value);
             }
         }
 

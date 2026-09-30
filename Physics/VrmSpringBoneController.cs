@@ -36,15 +36,24 @@ namespace AvatarReplacer
         public void Initialize(Giantess owner, float stiffnessOverride = -1f, float gravityPowerOverride = -1f, float dragOverride = -1f)
         {
             giantess = owner;
-            stiffness = stiffnessOverride;
-            gravityPower = gravityPowerOverride;
-            drag = dragOverride;
+            // Authored VRM spring bones carry the avatar's own physics. Only apply
+            // overrides when the user actually configured values (per-avatar
+            // profile or a customized global config); blindly overwriting them
+            // made hair/skirts look wrong (e.g. gravity 3.0 on chains authored
+            // for ~0). Overrides are per-field: unset ones stay -1 and are
+            // skipped by ApplyInitialVrm0Parameters.
+            if (stiffnessOverride > 0f || gravityPowerOverride > 0f || dragOverride > 0f)
+            {
+                stiffness = stiffnessOverride;
+                gravityPower = gravityPowerOverride;
+                drag = dragOverride;
+            }
             vrm0SpringBones = FindVrm0SpringBones();
             ApplyInitialVrm0Parameters();
             DiscoverVrm10Runtime();
             ConfigureScalingSupport();
 
-            ModLog.Info($"SpringBone controller initialized: VRM0={vrm0SpringBones.Length}, VRM1={hasVrm10}, RuntimeScaling={scalingSupportConfigured}");
+            ModLog.Info($"SpringBone controller initialized: VRM0={vrm0SpringBones.Length}, VRM1={hasVrm10}, RuntimeScaling={scalingSupportConfigured}, ParamOverrides={(stiffness > 0f || gravityPower > 0f || drag > 0f ? "on" : "off")}");
         }
 
         public void ProcessAfterAnimationFrame()
@@ -90,10 +99,13 @@ namespace AvatarReplacer
             {
                 try
                 {
-                    SetField(spring, "m_stiffnessForce", stiffness);
-                    SetField(spring, "m_gravityPower", gravityPower);
-                    SetField(spring, "m_gravityDir", Vector3.down);
-                    SetField(spring, "m_dragForce", drag);
+                    // Per-field guards: only overwrite parameters the user or
+                    // profile actually configured. Writing the unset (-1) sentinels
+                    // into VRMSpringBone fields produced nonsense physics.
+                    if (stiffness > 0f) SetField(spring, "m_stiffnessForce", stiffness);
+                    if (gravityPower > 0f) SetField(spring, "m_gravityPower", gravityPower);
+                    if (gravityPower > 0f) SetField(spring, "m_gravityDir", Vector3.down);
+                    if (drag > 0f) SetField(spring, "m_dragForce", drag);
                 }
                 catch (Exception ex)
                 {

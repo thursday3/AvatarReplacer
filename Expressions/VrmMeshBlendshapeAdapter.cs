@@ -122,6 +122,11 @@ namespace AvatarReplacer
             ApplyBlendshapeWeight(key, value);
         }
 
+        public bool HasClip(string key)
+        {
+            return !string.IsNullOrEmpty(key) && _nameToTargets.ContainsKey(key);
+        }
+
         public void BeginFrame()
         {
             _appliedThisFrame.Clear();

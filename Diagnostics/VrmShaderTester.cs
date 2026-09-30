@@ -71,6 +71,15 @@ namespace AvatarReplacer
             if (!IsEnabled || root == null)
                 return;
 
+            // No override configured: skip the whole capture/candidate lab and its
+            // large per-load log dump. ApplyConfiguredOverride -> EnsureReady
+            // re-initializes lazily the moment the user sets ShaderOverride.
+            if (string.IsNullOrWhiteSpace(AvatarReplacerPlugin.ShaderOverrideValue))
+            {
+                ModLog.Debug($"[ShaderTest] ShaderOverride is empty; live shader lab idle for {root.name}.");
+                return;
+            }
+
             CaptureTargetMaterials(root);
             DiscoverCandidates();
             initialized = true;
@@ -79,7 +88,7 @@ namespace AvatarReplacer
             for (int i = 0; i < candidates.Count; i++)
             {
                 Shader s = candidates[i];
-                ModLog.Info($"[ShaderTest] [{i + 1}/{candidates.Count}] {s.name}");
+                ModLog.Debug($"[ShaderTest] [{i + 1}/{candidates.Count}] {s.name}");
             }
 
             ApplyConfiguredOverride();

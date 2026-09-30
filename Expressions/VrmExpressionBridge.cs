@@ -30,6 +30,9 @@ namespace AvatarReplacer
         private Dictionary<string, string> normalizedCustomValues = new Dictionary<string, string>();
         private string blinkStringClip;
 
+        private CustomExpressionMap customMap;
+        private string customBlinkClip;
+
         public void Initialize(Giantess giantess, IVrmExpressionAdapter adapter)
         {
             sourceExpressionManager = giantess.expressionManager;
@@ -38,6 +41,8 @@ namespace AvatarReplacer
             SetupDefaultMappings();
 
             AutoDiscoverAndMapExpressions();
+
+            ApplyCustomMap();
 
             ModLog.Info($"Expression sync initialized. Mapped {eyeExpressionMap.Count + eyeCustomMap.Count} eyes and {mouthExpressionMap.Count + mouthCustomMap.Count} mouths.");
 
@@ -137,8 +142,12 @@ namespace AvatarReplacer
                 if (normalizedVrmNames.TryGetValue(cleanGameKey, out string vrmMatch))
                 {
 
-                    if (IsLookPresetName(vrmMatch)) {
-                         ModLog.Debug($"VrmExpressionBridge: Skipping Look preset match: '{gameKey}' -> '{vrmMatch}'");
+                    // Skip look presets AND any standard VRM preset name: those are
+                    // already driven through SetupDefaultMappings/preset adapters,
+                    // and a second custom mapping would double-drive the same
+                    // expression with a competing weight each frame.
+                    if (IsStandardPresetName(vrmMatch)) {
+                         ModLog.Debug($"VrmExpressionBridge: Skipping standard preset match: '{gameKey}' -> '{vrmMatch}'");
                          continue;
                     }
 
@@ -159,7 +168,7 @@ namespace AvatarReplacer
                     if (cleanVrm.Contains(cleanGameKey) || cleanGameKey.Contains(cleanVrm))
                     {
 
-                         if (IsLookPresetName(vn)) continue;
+                         if (IsStandardPresetName(vn)) continue;
 
                          if (isEye) eyeCustomMap[gameKey] = vn;
                          else if (isMouth) mouthCustomMap[gameKey] = vn;
@@ -172,11 +181,116 @@ namespace AvatarReplacer
             }
         }
 
+        /// <summary>
+        /// Applies the user-editable template map (config/expression_map.json).
+        /// Every filled row REPLACES whatever default/auto mapping exists for
+        /// that game expression, so users can fix or completely rewire a
+        /// mapping per avatar without touching code. Rows with an empty
+        /// 'vrmBlendShape' are ignored (that is what keeps the feature off).
+        /// </summary>
+        private void ApplyCustomMap()
+        {
+            customMap = null;
+            customBlinkClip = null;
+
+            if (vrmAdapter == null) return;
+
+            // Avatar-aware resolution: per-VRM map file first, then the shared map.
+            var map = CustomExpressionMap.LoadForAvatar(
+                AvatarReplacerPlugin.ConfigDirectory, AvatarReplacerPlugin.ActiveVrmPath);
+            if (map == null) return;
+
+            customMap = map;
+            int applied = 0;
+            foreach (var entry in map.ActiveMappings())
+            {
+                string game = entry.gameExpression;
+                string vrm = entry.vrmBlendShape.Trim();
+                if (string.IsNullOrWhiteSpace(game)) continue;
+
+                // Resolve the target: accept either a raw clip name that exists
+                // on the avatar, or a standard preset name (happy, blink, aa...).
+                string target = null;
+                if (vrmAdapter.HasClip(vrm))
+                {
+                    target = vrm;
+                }
+                else
+                {
+                    foreach (var name in vrmAdapter.GetClipNames())
+                    {
+                        if (string.Equals(Normalize(name), Normalize(vrm), StringComparison.Ordinal))
+                        {
+                            target = name;
+                            break;
+                        }
+                    }
+                }
+
+                if (target == null)
+                {
+                    ModLog.Info($"[WARN] Custom map: VRM has no clip '{vrm}' for game expression '{game}'. Row ignored.");
+                    continue;
+                }
+
+                if (game.Equals("Blink", StringComparison.OrdinalIgnoreCase))
+                {
+                    customBlinkClip = target;
+                }
+                else
+                {
+                    // An override REPLACES the default preset mapping and any
+                    // auto-discovered mapping for this game expression; leaving
+                    // them in place would drive the old target in parallel.
+                    eyeExpressionMap.Remove(game);
+                    mouthExpressionMap.Remove(game);
+                    eyeCustomMap.Remove(game);
+                    mouthCustomMap.Remove(game);
+
+                    // Route by key type, mirroring auto-discovery: eye keys go
+                    // through the eye path (no lip-sync suppression), mouth keys
+                    // through the mouth path (respects lip-sync priority).
+                    bool isEye = game.ToLowerInvariant().Contains("eyes") || game.ToLowerInvariant().Contains("look");
+                    bool isMouth = game.ToLowerInvariant().Contains("mouth");
+                    if (isMouth) mouthCustomMap[game] = target;
+                    else eyeCustomMap[game] = target;
+                }
+
+                applied++;
+                ModLog.Info($"Custom map: '{game}' -> '{target}'");
+            }
+
+            if (applied > 0)
+                ModLog.Info($"Custom expression map: {applied} override(s) applied over auto-mapping.");
+        }
+
         private bool IsLookPresetName(string name)
         {
             string lowerness = name.ToLower();
             return lowerness.Contains("lookup") || lowerness.Contains("lookdown") ||
                    lowerness.Contains("lookleft") || lowerness.Contains("lookright");
+        }
+
+        /// <summary>
+        /// True for names that normalize to a standard VRM 0.x/1.0 preset
+        /// (neutral, vowels, blink, emotions, look directions). Auto-discovery
+        /// must not create custom mappings to these; they are owned by the
+        /// preset adapter paths and double-driving causes wrong/stacked faces.
+        /// </summary>
+        private static readonly HashSet<string> StandardPresetNames = new HashSet<string>
+        {
+            "neutral", "a", "i", "u", "e", "o", "aa", "ih", "ou", "ee", "oh",
+            "blink", "blinkl", "blinkr", "blinkleft", "blinkright",
+            "joy", "angry", "sorrow", "fun", "happy", "sad", "relaxed",
+            "lookup", "lookdown", "lookleft", "lookright"
+        };
+
+        private bool IsStandardPresetName(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            string n = Normalize(name);
+            if (StandardPresetNames.Contains(n)) return true;
+            return IsLookPresetName(name);
         }
 
         private void TryExtractName(object item, HashSet<string> keys)
@@ -404,7 +518,10 @@ namespace AvatarReplacer
                 if (w > 0.01f)
                 {
                      string normVal = normalizedCustomValues.TryGetValue(kvp.Value, out var nv) ? nv : Normalize(kvp.Value);
-                     if (normVal == "a" || normVal == "i" || normVal == "u" || normVal == "e" || normVal == "o")
+                     // Recognize both single vowels and VRM standard vowel keys so
+                     // custom rows like "a mouth" -> "aa" count as lip sync.
+                     if (normVal == "a" || normVal == "i" || normVal == "u" || normVal == "e" || normVal == "o" ||
+                         normVal == "aa" || normVal == "ih" || normVal == "ou" || normVal == "ee" || normVal == "oh")
                      {
                          if (w > maxLipSyncWeight) maxLipSyncWeight = w;
                      }
@@ -460,7 +577,8 @@ namespace AvatarReplacer
                 if (w <= 0.01f) continue;
 
                 string v = normalizedCustomValues.TryGetValue(kvp.Value, out var nv) ? nv : Normalize(kvp.Value);
-                bool isLipSync = v == "a" || v == "i" || v == "u" || v == "e" || v == "o";
+                bool isLipSync = v == "a" || v == "i" || v == "u" || v == "e" || v == "o" ||
+                                 v == "aa" || v == "ih" || v == "ou" || v == "ee" || v == "oh";
                 if (!isLipSync)
                     w *= 1f - Mathf.Clamp01(maxLipSyncWeight);
                 if (w <= 0.01f) continue;
@@ -501,7 +619,7 @@ namespace AvatarReplacer
             var expr = sourceExpressionManager.TryGetExpression(gameKey);
             if (expr != null)
             {
-                return (expr.weight * expr.weightMultiplier) / 100f;
+                return Mathf.Clamp01((expr.weight * expr.weightMultiplier) / 100f);
             }
             return 0f;
         }
@@ -516,22 +634,21 @@ namespace AvatarReplacer
             currentCustomWeights[blendShapeName] = next;
 
             const float eps = 0.001f;
-            bool shouldForceZero = (target <= eps && next <= eps);
-
-            if (next > eps || target > eps || current > eps || shouldForceZero)
+            if (next <= eps && target <= eps)
             {
-                if (shouldForceZero && current > eps)
+                // Fully idle: write one final zero when clearing, then stop
+                // touching the blendshape every frame (previously re-wrote 0
+                // for every tracked expression on every frame).
+                if (current > eps)
                 {
-                    ModLog.Debug($"VrmExpressionBridge: Clearing custom blendshape '{blendShapeName}' from {current} to 0");
+                    vrmAdapter.ImmediatelySetValue(blendShapeName, 0f);
                 }
-
-                vrmAdapter.ImmediatelySetValue(blendShapeName, next);
-
-                if (next > eps)
-                    activeCustomKeys.Add(blendShapeName);
-                else
-                    activeCustomKeys.Remove(blendShapeName);
+                activeCustomKeys.Remove(blendShapeName);
+                return;
             }
+
+            vrmAdapter.ImmediatelySetValue(blendShapeName, next);
+            activeCustomKeys.Add(blendShapeName);
         }
 
         private void UpdateWeight(BlendShapePreset preset, float target, Dictionary<BlendShapePreset, float> weights)
@@ -543,15 +660,17 @@ namespace AvatarReplacer
                 weights[preset] = next;
 
                 const float eps = 0.001f;
-                bool shouldForceZero = (target <= eps && next <= eps);
-                if (next > eps || target > eps || shouldForceZero)
+                if (next <= eps && target <= eps)
                 {
-                    if (shouldForceZero && current > eps)
+                    // Idle: final clear write once, then go quiet.
+                    if (current > eps)
                     {
-                        ModLog.Debug($"VrmExpressionBridge: Clearing preset '{preset}' from {current} to 0");
+                        vrmAdapter.ImmediatelySetValue(preset, 0f);
                     }
-                    vrmAdapter.ImmediatelySetValue(preset, next);
+                    return;
                 }
+
+                vrmAdapter.ImmediatelySetValue(preset, next);
             }
         }
 
@@ -571,9 +690,18 @@ namespace AvatarReplacer
 
         private void SyncBlink()
         {
-            var blinkExpr = sourceExpressionManager.GetExpression("Blink");
+            // Use TryGetExpression: GetExpression throws KeyNotFoundException
+            // when the key is absent (verified in game ExpressionManager).
+            var blinkExpr = sourceExpressionManager.TryGetExpression("Blink");
             float targetBlinkWeight = (blinkExpr != null) ? ((blinkExpr.weight * blinkExpr.weightMultiplier) / 100f) : 0f;
             currentBlinkWeight = Mathf.MoveTowards(currentBlinkWeight, targetBlinkWeight, Time.deltaTime * BlinkSmoothingSpeed);
+
+            // Template-map override: route blink through the mapped clip.
+            if (!string.IsNullOrEmpty(customBlinkClip))
+            {
+                vrmAdapter.ImmediatelySetValue(customBlinkClip, currentBlinkWeight);
+                return;
+            }
 
             bool hasBlink = vrmAdapter.HasClip(BlendShapePreset.Blink);
             bool hasBlinkL = vrmAdapter.HasClip(BlendShapePreset.Blink_L);

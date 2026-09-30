@@ -33,6 +33,7 @@ namespace AvatarReplacer
         private static ConfigEntry<bool> AutoSpringBone;
         private static ConfigEntry<string> AutoSpringBoneKeywords;
         private static ConfigEntry<int> AutoSpringBoneMaxRoots;
+        private static ConfigEntry<bool> AutoSpringBoneOnAvatarsWithBones;
         private static ConfigEntry<bool> SmallScaleLocomotionFixEnabled;
         private static ConfigEntry<float> SmallScaleLocomotionFixThresholdMeters;
         private static ConfigEntry<float> SmallScaleLocomotionFixStrideFactorMin;
@@ -49,11 +50,26 @@ namespace AvatarReplacer
         public static ConfigEntry<KeyCode> DiagnosticsKey;
 
         private static string configDir;
+
+        /// <summary>Directory holding per-avatar profiles, expression_map.json etc.</summary>
+        public static string ConfigDirectory => configDir;
         private static Dictionary<string, VrmAvatarProfile> profileCache = new Dictionary<string, VrmAvatarProfile>();
 
-        public static float SpringBoneStiffnessValue => SpringBoneStiffness.Value;
-        public static float SpringBoneGravityPowerValue => SpringBoneGravityPower.Value;
-        public static float SpringBoneDragValue => SpringBoneDrag.Value;
+        public static float SpringBoneStiffnessValue => SpringBoneStiffness != null && !IsDefaultConfigValue(SpringBoneStiffness) ? SpringBoneStiffness.Value : -1f;
+        public static float SpringBoneGravityPowerValue => SpringBoneGravityPower != null && !IsDefaultConfigValue(SpringBoneGravityPower) ? SpringBoneGravityPower.Value : -1f;
+        public static float SpringBoneDragValue => SpringBoneDrag != null && !IsDefaultConfigValue(SpringBoneDrag) ? SpringBoneDrag.Value : -1f;
+
+        /// <summary>
+        /// Spring bone parameter overrides only apply when the user changed them
+        /// from the BepInEx config defaults. Unchanged defaults (5/3/1) previously
+        /// clobbered every authored VRM0 spring bone on every avatar, breaking
+        /// hair/skirt physics; authored values are respected unless customized.
+        /// </summary>
+        private static bool IsDefaultConfigValue(ConfigEntry<float> entry)
+        {
+            try { return entry.Value.Equals(Convert.ToSingle(entry.DefaultValue)); }
+            catch { return false; }
+        }
         public static bool SmallScaleLocomotionFixEnabledValue => SmallScaleLocomotionFixEnabled == null || SmallScaleLocomotionFixEnabled.Value;
         public static float SmallScaleLocomotionFixThresholdMetersValue => SmallScaleLocomotionFixThresholdMeters != null ? Mathf.Max(0.1f, SmallScaleLocomotionFixThresholdMeters.Value) : 60f;
         public static float SmallScaleLocomotionFixStrideFactorMinValue => SmallScaleLocomotionFixStrideFactorMin != null ? Mathf.Clamp(SmallScaleLocomotionFixStrideFactorMin.Value, 0.1f, 1f) : 0.75f;
@@ -62,7 +78,30 @@ namespace AvatarReplacer
         public static float SpringBoneDiagnosticsIntervalValue => 2.0f;
 
         private static VrmManager activeVrmManager;
+        private static string activeVrmPath = null;
         private static bool loadingVrm = false;
+
+        private static bool loggedProxyOnDestroyError = false;
+
+        /// <summary>
+        /// UniVRM's VRMBlendShapeProxy.OnDestroy calls
+        /// VRM.BlendShapeMerger.RestoreMaterialInitialValues, which touches
+        /// UnityEditor-only APIs. In a player build that throws
+        /// FileNotFoundException (UnityEditor.CoreModule) and can spam errors on
+        /// every avatar unload. A finalizer swallows exactly that failure.
+        /// </summary>
+        [HarmonyPatch(typeof(VRM.VRMBlendShapeProxy), "OnDestroy")]
+        [HarmonyFinalizer]
+        private static System.Exception VRMBlendShapeProxy_OnDestroy_Finalizer(System.Exception __exception)
+        {
+            if (__exception == null) return null;
+            if (!loggedProxyOnDestroyError)
+            {
+                loggedProxyOnDestroyError = true;
+                ModLog.Info($"[AvatarReplacer] Suppressed VRMBlendShapeProxy.OnDestroy error (editor-only cleanup, harmless): {__exception.Message}");
+            }
+            return null; // swallow
+        }
 
         private static List<string> availableVrmFiles = new List<string>();
         private static int currentVrmIndex = -1;
@@ -78,6 +117,9 @@ namespace AvatarReplacer
 
         public static bool IsDebugEnabled => DebugMode != null && DebugMode.Value;
         public static VrmManager ActiveVrmManager => activeVrmManager;
+
+        /// <summary>Path of the VRM currently being set up (for per-VRM config files).</summary>
+        public static string ActiveVrmPath => activeVrmPath;
         public static bool ShaderTestEnabledValue => ShaderTestEnabled != null && ShaderTestEnabled.Value;
         public static string ShaderOverrideValue => ShaderOverride != null ? ShaderOverride.Value : string.Empty;
         public static string ShaderBundlePathValue => ShaderBundlePath != null ? ShaderBundlePath.Value : string.Empty;
@@ -118,9 +160,10 @@ namespace AvatarReplacer
             SpringBoneGravityPower = Config.Bind("SpringBone", "GravityPower", 3.0f, "VRMSpringBone gravity power");
             SpringBoneDrag = Config.Bind("SpringBone", "Drag", 1.0f, "VRMSpringBone drag force");
 
-            AutoSpringBone = Config.Bind("SpringBone", "AutoGenerate", true, "Auto-generate SpringBones for avatars that have none.");
+            AutoSpringBone = Config.Bind("SpringBone", "AutoGenerate", false, "Auto-generate SpringBones for avatar bones matched by AutoKeywords. OFF by default: keyword-guessed springs can drag head/body-adjacent chains and visibly deform the avatar. Enable only for avatars with no VRM spring bones.");
             AutoSpringBoneKeywords = Config.Bind("SpringBone", "AutoKeywords", "hair,skirt,tail,cape,cloth,dress,accessory,ribbon,sleeve,belt,twintail,frill,lace,string", "Keywords to find bones for auto SpringBone.");
             AutoSpringBoneMaxRoots = Config.Bind("SpringBone", "AutoMaxRoots", 16, "Max number of auto SpringBone root bones.");
+            AutoSpringBoneOnAvatarsWithBones = Config.Bind("SpringBone", "AutoGenerateOnAvatarsWithBones", false, "Also run the auto generator on avatars that already have VRM spring bones (adds extra chains). Leave false unless you know an avatar's own springs are missing.");
             SmallScaleLocomotionFixEnabled = Config.Bind("SmallScaleLocomotionFix", "Enabled", true, "Enable small-scale stride and hip smoothing compensation.");
             SmallScaleLocomotionFixThresholdMeters = Config.Bind("SmallScaleLocomotionFix", "ThresholdMeters", 60f, "Apply compensation at and below this giantess height in meters.");
             SmallScaleLocomotionFixStrideFactorMin = Config.Bind("SmallScaleLocomotionFix", "StrideFactorMin", 0.75f, "Minimum stride armature factor at strongest small-scale compensation.");
@@ -181,6 +224,7 @@ namespace AvatarReplacer
             cacheAccessOrder.Clear();
             profileCache.Clear();
             activeVrmManager = null;
+            activeVrmPath = null;
 
             string vrmDir = Path.Combine(Paths.PluginPath, "AvatarReplacer", "vrm");
             string legacyDir = Path.Combine(Paths.PluginPath, "AvatarReplacer");
@@ -206,6 +250,11 @@ namespace AvatarReplacer
             }
 
             ModLog.Info($"[AvatarReplacer] Found {availableVrmFiles.Count} VRM files (was {previousCount}).");
+
+            // One expression_map.<avatar>.json per discovered model. Existing
+            // files are never overwritten, so adding a new VRM only creates its
+            // own template and user-edited maps keep their values.
+            CustomExpressionMap.EnsureTemplatesForVrmFolder(vrmDir);
 
             string defaultName = VrmFileName.Value;
             int foundIndex = -1;
@@ -260,6 +309,7 @@ namespace AvatarReplacer
             cacheAccessOrder.Clear();
             profileCache.Clear();
             activeVrmManager = null;
+            activeVrmPath = null;
             currentGiantessTarget = null;
         }
 
@@ -415,6 +465,7 @@ namespace AvatarReplacer
                         }
 
                         activeVrmManager = cached;
+                        activeVrmPath = path;
                         activeVrmManager.gameObject.SetActive(true);
 
                         cacheAccessOrder.Remove(path);
@@ -478,7 +529,8 @@ namespace AvatarReplacer
                         configuredStiffness,
                         configuredGravity,
                         configuredDrag,
-                        DebugMode.Value
+                        DebugMode.Value,
+                        AutoSpringBoneOnAvatarsWithBones.Value
                     );
                 }
 
@@ -541,6 +593,7 @@ namespace AvatarReplacer
                     ModLog.Debug($"Giantess.scale: {giantess.scale:F3}. VRM will inherit parent scale automatically.");
 
                 activeVrmManager = vrmRoot.AddComponent<VrmManager>();
+                activeVrmPath = path;
 
                 foreach (var manager in loadedVrmCache.Values)
                 {

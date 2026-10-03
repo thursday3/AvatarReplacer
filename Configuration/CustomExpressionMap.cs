@@ -144,8 +144,11 @@ namespace AvatarReplacer
 
         /// <summary>
         /// Loads the map for a specific avatar. Resolution order:
-        ///  1. per-VRM file expression_map.&lt;avatar&gt;.json (if present and filled)
-        ///  2. shared expression_map.json (when no per-VRM file exists)
+        ///  1. A populated per-VRM file expression_map.&lt;avatar&gt;.json.
+        ///  2. The shared expression_map.json when the per-VRM file is absent,
+        ///     invalid, or contains no filled mappings.
+        /// A populated per-VRM map is selected as a whole; its empty rows do
+        /// not inherit individual rows from the shared map.
         /// Returns null when the feature should be OFF (missing file -> template
         /// written first; or no filled rows).
         /// </summary>

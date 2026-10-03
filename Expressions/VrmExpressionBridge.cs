@@ -182,11 +182,13 @@ namespace AvatarReplacer
         }
 
         /// <summary>
-        /// Applies the user-editable template map (config/expression_map.json).
+        /// Loads and applies the user-editable shared or per-avatar expression map.
         /// Every filled row REPLACES whatever default/auto mapping exists for
         /// that game expression, so users can fix or completely rewire a
         /// mapping per avatar without touching code. Rows with an empty
         /// 'vrmBlendShape' are ignored (that is what keeps the feature off).
+        /// This runs during avatar initialization; editing a JSON file does not
+        /// update an already initialized bridge until that avatar is reloaded.
         /// </summary>
         private void ApplyCustomMap()
         {
@@ -208,8 +210,10 @@ namespace AvatarReplacer
                 string vrm = entry.vrmBlendShape.Trim();
                 if (string.IsNullOrWhiteSpace(game)) continue;
 
-                // Resolve the target: accept either a raw clip name that exists
-                // on the avatar, or a standard preset name (happy, blink, aa...).
+                // Resolve against the active adapter so a typo or a clip absent
+                // from this avatar cannot replace a working built-in mapping.
+                // Names are compared case-insensitively after normalization as a
+                // fallback, then the adapter retains the VRM's actual clip spelling.
                 string target = null;
                 if (vrmAdapter.HasClip(vrm))
                 {

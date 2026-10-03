@@ -265,8 +265,29 @@ namespace AvatarReplacer
 
         public void SetOriginalRenderers(System.Collections.Generic.List<Renderer> renderers, Component variation)
         {
-            originalRenderers = renderers;
+            originalRenderers = renderers ?? new List<Renderer>();
             originalVariation = variation;
+        }
+
+        /// <summary>
+        /// Reasserts the original avatar's hidden state when this cached VRM is
+        /// made active. The game can re-enable its renderers during gameplay,
+        /// so applying this only during the initial load is not sufficient.
+        /// </summary>
+        public void EnsureOriginalAvatarHidden()
+        {
+            foreach (var renderer in originalRenderers)
+            {
+                if (renderer != null)
+                    renderer.enabled = false;
+            }
+
+            if (originalVariation != null)
+            {
+                var enabledProp = originalVariation.GetType().GetProperty("enabled");
+                if (enabledProp != null && enabledProp.CanWrite)
+                    enabledProp.SetValue(originalVariation, false);
+            }
         }
 
         public void ToggleAvatarVisibility()

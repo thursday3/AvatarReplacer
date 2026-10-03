@@ -472,6 +472,8 @@ namespace AvatarReplacer
                         cacheAccessOrder.Add(path);
 
                         activeVrmManager.SetVisibility(true);
+                        if (HideOriginalMesh.Value)
+                            activeVrmManager.EnsureOriginalAvatarHidden();
                         VrmShaderTester.SetTarget(activeVrmManager.gameObject);
 
                         var cachedProfile = GetOrLoadProfile(path);

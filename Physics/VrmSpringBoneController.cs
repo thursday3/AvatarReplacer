@@ -134,8 +134,9 @@ namespace AvatarReplacer
 
         private void DiscoverVrm10Runtime()
         {
-            var type = Type.GetType("UniVRM10.Vrm10Instance, VRM10");
-            if (type == null) return;
+            // Use the referenced type directly; resolving it loads the embedded
+            // VRM10 assembly before the component lookup.
+            var type = typeof(UniVRM10.Vrm10Instance);
 
             var instance = GetComponent(type) ?? GetComponentInChildren(type, true);
             if (instance == null) return;

@@ -65,7 +65,9 @@ namespace AvatarReplacer
             this.vrm10Instance = GetComponent<Vrm10Instance>() ?? GetComponentInChildren<Vrm10Instance>(true);
             // Legacy VRM 0.x look-at: reflection keeps this version-proof against
             // whatever UniVRM build ships in lib/VRM.dll.
-            var vrm0Type = System.Type.GetType("VRM.VRMLookAtHead, VRM") ?? typeof(Vrm10Instance).Assembly.GetType("VRM.VRMLookAtHead");
+            // Resolve through the compile-time reference; the embedded VRM
+            // assembly keeps its original identity when loaded at runtime.
+            var vrm0Type = typeof(VRMLookAtHead);
             if (vrm0Type != null)
             {
                 vrm0LookAt = GetComponent(vrm0Type) ?? GetComponentInChildren(vrm0Type, true);

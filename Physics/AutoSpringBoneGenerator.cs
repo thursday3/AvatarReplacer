@@ -87,7 +87,9 @@ namespace AvatarReplacer
                 return;
             }
 
-            var springType = Type.GetType("VRM.VRMSpringBone, VRM");
+            // Look in the assembly that owns the VRM 0.x runtime type. The
+            // embedded library is loaded with its original assembly identity.
+            var springType = typeof(VRM.VRMBlendShapeProxy).Assembly.GetType("VRM.VRMSpringBone");
             if (springType == null)
             {
                 if (debug) ModLog.Debug("AutoSpringBone: VRMSpringBone type not found.");

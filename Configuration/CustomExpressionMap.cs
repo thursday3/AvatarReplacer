@@ -6,72 +6,45 @@ using UnityEngine;
 namespace AvatarReplacer
 {
     /// <summary>
-    /// One row of the expression map: a giantess expression name and the VRM
-    /// blendshape that should be driven by it.
-    ///   vrmBlendShape == ""  -> follow the built-in default mapping
-    ///   vrmBlendShape != ""  -> override it with this blendshape
-    /// To find blendshape names on your model, open the .vrm in Blender
-    /// (Object Data Properties -> Shape Keys) and copy the names you want.
+    /// One row of the expression map — a fully visible mapping line:
+    ///
+    ///   gameExpression : the giantess expression (game side)
+    ///   defaultVrm     : what the mod uses when you don't override (reference)
+    ///   vrmBlendShape  : what is actually driven; empty = use defaultVrm
+    ///
+    /// To override a row, put a blendshape name in vrmBlendShape. Empty rows
+    /// and never-listed expressions alike are shown so the player can see —
+    /// and change — the complete behaviour of the mod on their avatar.
     /// </summary>
     [Serializable]
     public class CustomExpressionEntry
     {
         public string gameExpression = "";
+        public string defaultVrm = "";
         public string vrmBlendShape = "";
     }
 
     /// <summary>
-    /// Minimal per-avatar expression map.
+    /// Per-avatar expression map, readable as a visible map of how the mod
+    /// drives the VRM:
     ///
-    ///   BepInEx/plugins/AvatarReplacer/config/expression_map.json            (shared, any avatar)
-    ///   BepInEx/plugins/AvatarReplacer/config/expression_map.&lt;avatarname&gt;.json (per-VRM only)
+    ///   BepInEx/plugins/AvatarReplacer/config/expression_map.&lt;avatarname&gt;.json
     ///
-    /// The file is simply the target VRM name plus one line per giantess
-    /// expression, all empty by default:
+    /// A generated file lists EVERY game expression the mod can drive —
+    /// including empty and unused ones — with its default VRM preset filled
+    /// in, so editing is simply changing the "vrmBlendShape" column.
     ///
-    /// {
-    ///     "targetVrm": "avatar1",
-    ///     "mappings": [
-    ///         { "gameExpression": "happy eyes", "vrmBlendShape": "" },
-    ///         ...
-    ///     ]
-    /// }
-    ///
-    /// Empty vrmBlendShape = default. Filled vrmBlendShape = override.
-    /// Filling any row turns the map on; the per-VRM file then replaces the
-    /// shared map for that avatar (so avatars with different blendshape names
-    /// never conflict). "targetVrm" guards the per-VRM file against being used
-    /// for a different avatar; the shared map ignores it.
+    /// Templates are regenerated ONLY when the file is missing or is an empty
+    /// skeleton (zero mapping rows — the older generator's broken output).
+    /// A file that contains rows is never rewritten, byte for byte.
+    /// gameExpression keys the mod can't find on this avatar are still listed
+    /// (bad rows are logged and skipped at load; they never break the map).
     /// </summary>
     [Serializable]
     public class CustomExpressionMap
     {
         public string targetVrm = "";
         public List<CustomExpressionEntry> mappings = new List<CustomExpressionEntry>();
-
-        // ---------------------------------------------------------------------------
-        // Ground-truth expression names (Lethal Fantasy, GiantessExpressionManager):
-        // eye/mouth display names from eyeExpressionEnums/mouthExpressionEnums/
-        // eyeDialogueExpressions dictionaries, plus the special expressions accessed
-        // by GetExpression("...") in Start()/LateUpdate.
-        // Do not rename these keys; they must match the game exactly.
-        // ---------------------------------------------------------------------------
-        private static readonly string[] TemplateKeys = new[]
-        {
-            // Eyes
-            "happy eyes", "serious eyes", "sad eyes", "angry eyes", "hurt eyes",
-            "smug eyes", "shock eyes", "vore eyes", "shy eyes", "embarrased eyes",
-            "laugh eyes", "cry eyes", "frown eyes", "screaming eyes", "mad eyes",
-            "neutral tilt eyes",
-            // Mouths
-            "happy mouth", "serious mouth", "sad mouth", "angry mouth", "hurt mouth",
-            "smug mouth", "shock mouth", "smile mouth", "a mouth", "i mouth",
-            "u mouth", "e mouth", "o mouth", "vore mouth", "shy mouth",
-            "embarrased mouth", "laugh mouth", "cry mouth", "frown mouth",
-            "screaming mouth", "mad mouth", "neutral tilt mouth",
-            // Special expressions
-            "Blink", "tilt", "anger small", "anger large", "tears sad", "tears laugh"
-        };
 
         /// <summary>The map is active when at least one row names a blendshape.</summary>
         public bool HasActiveMappings
@@ -143,28 +116,29 @@ namespace AvatarReplacer
         }
 
         /// <summary>
-        /// Loads the map for a specific avatar. Resolution order:
-        ///  1. A populated per-VRM file expression_map.&lt;avatar&gt;.json.
-        ///  2. The shared expression_map.json when the per-VRM file is absent,
-        ///     invalid, or contains no filled mappings.
-        /// A populated per-VRM map is selected as a whole; its empty rows do
-        /// not inherit individual rows from the shared map.
-        /// Returns null when the feature should be OFF (missing file -> template
-        /// written first; or no filled rows).
+        /// Loads the map for a specific avatar, upgrading stale files on the
+        /// way. Resolution order:
+        ///  1. per-VRM file expression_map.&lt;avatar&gt;.json (if present and usable)
+        ///  2. shared expression_map.json
+        /// Upgrades performed before the decision (both no-clobber for files
+        /// with real content):
+        ///  - a zero-row skeleton is regenerated as a full visible template;
+        ///  - game expressions missing from the file are appended as new rows;
+        ///  - legacy rows without defaultVrm get it filled in.
+        /// Returns null when the feature should be OFF (no filled rows).
         /// </summary>
         public static CustomExpressionMap LoadForAvatar(string configDir, string vrmPath)
         {
             string perVrm = GetPerVrmPath(configDir, vrmPath);
             if (perVrm != null)
             {
-                if (!File.Exists(perVrm))
+                if (File.Exists(perVrm))
                 {
-                    // First use of this avatar: create the template with targetVrm
-                    // pre-filled and one empty row per giantess expression.
-                    CreateTemplate(perVrm, Path.GetFileNameWithoutExtension(vrmPath));
-                }
-                else
-                {
+                    if (UpgradeFileInPlace(perVrm, Path.GetFileNameWithoutExtension(vrmPath)))
+                    {
+                        ModLog.Info($"Expression map {Path.GetFileName(perVrm)} was auto-upgraded (visible defaults / appended rows) — check 'defaultVrm' and your overrides are intact.");
+                    }
+
                     var map = LoadFromFile(perVrm);
                     if (map != null)
                     {
@@ -178,16 +152,126 @@ namespace AvatarReplacer
                     }
                     // Empty template: fall through to the shared map.
                 }
+                else
+                {
+                    // First use of this avatar: full visible template with
+                    // targetVrm pre-filled and every expression listed.
+                    CreateTemplate(perVrm, Path.GetFileNameWithoutExtension(vrmPath));
+                }
             }
 
             string shared = GetPath(configDir);
             if (string.IsNullOrEmpty(shared)) return null;
-            if (!File.Exists(shared))
+            if (File.Exists(shared))
             {
-                CreateTemplate(shared, null);
-                return null;
+                UpgradeFileInPlace(shared, null);
+                return LoadFromFile(shared);
             }
-            return LoadFromFile(shared);
+
+            CreateTemplate(shared, null);
+            return null;
+        }
+
+        /// <summary>
+        /// In-place freshness pass over one map file. NEVER rewrites a file
+        /// that already lists every known game expression with defaults — i.e.
+        /// any file with real user content. Handles exactly these shapes:
+        ///  - missing / unreadable: nothing written by this method;
+        ///  - zero-row skeleton (old generator output): regenerated in full;
+        ///  - valid file missing some game expressions: rows appended (and
+        ///    legacy rows get their default column filled from the table);
+        ///  - valid file whose expression list is complete: untouched.
+        /// Returns true when the file was changed on disk.
+        /// </summary>
+        public static bool UpgradeFileInPlace(string path, string targetVrm)
+        {
+            try
+            {
+                bool exists = File.Exists(path);
+                if (!exists) return false; // creation handled by CreateTemplate
+
+                CustomExpressionMap map = null;
+                bool parsed = false;
+                try
+                {
+                    map = JsonUtility.FromJson<CustomExpressionMap>(File.ReadAllText(path));
+                    parsed = map != null;
+                }
+                catch
+                {
+                    parsed = false;
+                }
+
+                if (!parsed)
+                {
+                    // Raw skeleton (e.g. "{ "targetVrm": "x" }" with no rows
+                    // wrapped */ at all): rewrite as a fresh full template.
+                    CreateTemplate(path, targetVrm, force: true);
+                    return true;
+                }
+
+                if (map.mappings == null) map.mappings = new List<CustomExpressionEntry>();
+                if (map.mappings.Count == 0)
+                {
+                    // Zero-row skeleton: regenerate completely.
+                    CreateTemplate(path, targetVrm, force: true);
+                    ModLog.Info($"Expression map {Path.GetFileName(path)} was an empty skeleton; regenerated with the full visible map.");
+                    return true;
+                }
+
+                // Valid file with rows: append any game expressions the mod
+                // knows now that the file doesn't list yet. Keep user bytes
+                // untouched otherwise (in particular: do not rewrite the file
+                // when nothing is appended).
+                var listed = new HashSet<string>();
+                bool backfilled = false;
+                var defaultsByKey = new Dictionary<string, string>();
+                foreach (var def in ExpressionDefaults.All)
+                    defaultsByKey[def.GameExpression] = def.DefaultPreset ?? "";
+
+                foreach (var row in map.mappings)
+                {
+                    if (row == null || string.IsNullOrWhiteSpace(row.gameExpression)) continue;
+                    listed.Add(row.gameExpression.Trim());
+                    // Legacy rows (pre visible-map format) have an empty
+                    // reference column; fill it from the table so the file
+                    // shows what the mod actually does. Overrides are never
+                    // touched by this pass.
+                    if (string.IsNullOrEmpty(row.defaultVrm) &&
+                        defaultsByKey.TryGetValue(row.gameExpression.Trim(), out var def0) &&
+                        !string.IsNullOrEmpty(def0))
+                    {
+                        row.defaultVrm = def0;
+                        backfilled = true;
+                    }
+                }
+
+                bool appended = false;
+                foreach (var def in ExpressionDefaults.All)
+                {
+                    if (!listed.Contains(def.GameExpression))
+                    {
+                        map.mappings.Add(new CustomExpressionEntry
+                        {
+                            gameExpression = def.GameExpression,
+                            defaultVrm = def.DefaultPreset ?? "",
+                            vrmBlendShape = ""
+                        });
+                        appended = true;
+                    }
+                }
+                if (appended || backfilled)
+                {
+                    File.WriteAllText(path, JsonUtility.ToJson(map, true));
+                    ModLog.Info($"Expression map {Path.GetFileName(path)} upgraded: {(appended ? "appended missing rows" : "filled defaults")}; overrides kept.");
+                }
+                return appended || backfilled;
+            }
+            catch (Exception e)
+            {
+                ModLog.Info($"[WARN] Failed to refresh expression map {Path.GetFileName(path)}: {e.Message}");
+                return false;
+            }
         }
 
         private static CustomExpressionMap LoadFromFile(string path)
@@ -216,27 +300,40 @@ namespace AvatarReplacer
             }
         }
 
-        public static void CreateTemplate(string path, string targetVrm)
+        /// <summary>
+        /// Writes a FULL visible template: every expression known to the mod
+        /// (including empty and unused ones), each with its default preset
+        /// shown in 'defaultVrm' so the player can see what empty means.
+        ///
+        /// With force:false the file is created only when missing (NEVER
+        /// overwrites user edits). With force:true an existing file is
+        /// replaced — used exclusively to upgrade zero-row skeletons.
+        /// Default mappings come from ExpressionDefaults (single source of
+        /// truth used by the runtime too).
+        /// </summary>
+        public static void CreateTemplate(string path, string targetVrm, bool force = false)
         {
             try
             {
-                if (File.Exists(path)) return; // NEVER overwrite user edits
+                if (File.Exists(path) && !force) return; // NEVER overwrite user edits
+
                 string dir = Path.GetDirectoryName(path);
                 if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                     Directory.CreateDirectory(dir);
 
                 var template = new CustomExpressionMap { targetVrm = targetVrm ?? "" };
-                foreach (var key in TemplateKeys)
+                foreach (var def in ExpressionDefaults.All)
                 {
                     template.mappings.Add(new CustomExpressionEntry
                     {
-                        gameExpression = key,
-                        vrmBlendShape = ""   // empty = follow the default mapping
+                        gameExpression = def.GameExpression,
+                        defaultVrm = def.DefaultPreset ?? "",
+                        vrmBlendShape = ""   // empty = use the default shown beside it
                     });
                 }
 
                 File.WriteAllText(path, JsonUtility.ToJson(template, true));
-                ModLog.Info($"Created expression map template at: {path} (empty vrmBlendShape = default; fill one to override it).");
+                ModLog.Info($"Created expression map template at: {path} (defaultVrm = what an empty vrmBlendShape uses; fill vrmBlendShape to override).");
             }
             catch (Exception e)
             {
@@ -245,10 +342,10 @@ namespace AvatarReplacer
         }
 
         /// <summary>
-        /// Creates an empty template (one row per giantess expression, all
-        /// "vrmBlendShape": "") for every .vrm in the given folder. Existing
-        /// files are never touched, so a new model dropped into the folder only
-        /// gains its own file and user-edited maps keep their values.
+        /// Creates a full visible template for every .vrm in the given folder.
+        /// Zero-row skeleton files from older builds are regenerated; files
+        /// with real rows are never touched, so a new model only gains its own
+        /// file and user-edited maps keep every value.
         /// </summary>
         public static int EnsureTemplatesForVrmFolder(string vrmDirectory)
         {
@@ -264,10 +361,24 @@ namespace AvatarReplacer
                 foreach (var vrm in Directory.GetFiles(vrmDirectory, "*.vrm"))
                 {
                     string perVrm = GetPerVrmPath(configDir, vrm);
-                    if (string.IsNullOrEmpty(perVrm) || File.Exists(perVrm))
-                        continue; // exists: keep the user's edits untouched
-                    CreateTemplate(perVrm, Path.GetFileNameWithoutExtension(vrm));
-                    if (File.Exists(perVrm)) created++;
+                    if (string.IsNullOrEmpty(perVrm))
+                        continue;
+                    int before = created;
+                    if (File.Exists(perVrm))
+                    {
+                        // Upgrade stale skeletons in place; no-op for files
+                        // with rows. This is what keeps "never clobber the
+                        // player's edits" true across even this format change.
+                        if (UpgradeFileInPlace(perVrm, Path.GetFileNameWithoutExtension(vrm)))
+                            created++;
+                    }
+                    else
+                    {
+                        CreateTemplate(perVrm, Path.GetFileNameWithoutExtension(vrm));
+                        if (File.Exists(perVrm)) created++;
+                    }
+                    if (created > before)
+                        ModLog.Info($"Expression map for {Path.GetFileName(vrm)}: generated fresh full visible map.");
                 }
             }
             catch (Exception e)
@@ -276,7 +387,7 @@ namespace AvatarReplacer
             }
 
             if (created > 0)
-                ModLog.Info($"Generated {created} expression map template(s) in {configDir} (existing files untouched).");
+                ModLog.Info($"Expression maps written/updated: {created} in {configDir} (files with existing rows untouched).");
             return created;
         }
     }

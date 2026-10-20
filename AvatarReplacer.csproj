@@ -19,39 +19,51 @@
   <ItemGroup>
     <Reference Include="BepInEx">
       <HintPath>$(BepInExCoreDir)\BepInEx.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="0Harmony">
       <HintPath>$(BepInExCoreDir)\0Harmony.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine">
       <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.AssetBundleModule">
       <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.AssetBundleModule.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.AnimationModule">
       <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.AnimationModule.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.PhysicsModule">
       <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.InputLegacyModule">
       <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.InputModule">
       <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.InputModule.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.JSONSerializeModule">
       <HintPath>$(GameDir)\LethalFantasy_Data\Managed\UnityEngine.JSONSerializeModule.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="Assembly-CSharp">
       <HintPath>$(GameDir)\LethalFantasy_Data\Managed\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
     </Reference>
   </ItemGroup>
 
@@ -62,28 +74,59 @@
   <ItemGroup>
     <Reference Include="VRM10">
       <HintPath>lib\VRM10.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="UniGLTF">
       <HintPath>lib\UniGLTF.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="UniGLTF.Utils">
       <HintPath>lib\UniGLTF.Utils.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="UniHumanoid">
       <HintPath>lib\UniHumanoid.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="VRM">
       <HintPath>lib\VRM.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="MToon">
       <HintPath>lib\MToon.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="VrmLib">
       <HintPath>lib\VrmLib.dll</HintPath>
+      <Private>false</Private>
     </Reference>
     <Reference Include="VRM10.MToon10">
       <HintPath>lib\VRM10.MToon10.dll</HintPath>
+      <Private>false</Private>
     </Reference>
+    <Reference Include="FastSpringBone10">
+      <HintPath>lib\FastSpringBone10.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SpringBoneJobs">
+      <HintPath>lib\SpringBoneJobs.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Keep UniVRM's assembly identities intact, but package their bytes inside
+       the plugin so the installed mod is one DLL. -->
+  <ItemGroup>
+    <EmbeddedResource Include="$(MSBuildProjectDirectory)/lib/VRM10.dll" LogicalName="AvatarReplacer.Dependencies.VRM10.dll" />
+    <EmbeddedResource Include="$(MSBuildProjectDirectory)/lib/UniGLTF.dll" LogicalName="AvatarReplacer.Dependencies.UniGLTF.dll" />
+    <EmbeddedResource Include="$(MSBuildProjectDirectory)/lib/UniGLTF.Utils.dll" LogicalName="AvatarReplacer.Dependencies.UniGLTF.Utils.dll" />
+    <EmbeddedResource Include="$(MSBuildProjectDirectory)/lib/UniHumanoid.dll" LogicalName="AvatarReplacer.Dependencies.UniHumanoid.dll" />
+    <EmbeddedResource Include="$(MSBuildProjectDirectory)/lib/VRM.dll" LogicalName="AvatarReplacer.Dependencies.VRM.dll" />
+    <EmbeddedResource Include="$(MSBuildProjectDirectory)/lib/MToon.dll" LogicalName="AvatarReplacer.Dependencies.MToon.dll" />
+    <EmbeddedResource Include="$(MSBuildProjectDirectory)/lib/VrmLib.dll" LogicalName="AvatarReplacer.Dependencies.VrmLib.dll" />
+    <EmbeddedResource Include="$(MSBuildProjectDirectory)/lib/VRM10.MToon10.dll" LogicalName="AvatarReplacer.Dependencies.VRM10.MToon10.dll" />
+    <EmbeddedResource Include="$(MSBuildProjectDirectory)/lib/FastSpringBone10.dll" LogicalName="AvatarReplacer.Dependencies.FastSpringBone10.dll" />
+    <EmbeddedResource Include="$(MSBuildProjectDirectory)/lib/SpringBoneJobs.dll" LogicalName="AvatarReplacer.Dependencies.SpringBoneJobs.dll" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(LilToonBundlePath)' != '' and Exists('$(LilToonBundlePath)')">

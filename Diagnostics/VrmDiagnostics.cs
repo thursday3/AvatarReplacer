@@ -20,7 +20,8 @@ namespace AvatarReplacer
                 .Sum(r => r.sharedMesh.blendShapeCount);
             int springBones = avatar.GetComponentsInChildren<Component>(true)
                 .Count(c => c != null && c.GetType().Name.IndexOf("SpringBone", StringComparison.OrdinalIgnoreCase) >= 0);
-            var vrm10Type = Type.GetType("UniVRM10.Vrm10Instance, VRM10");
+            // Resolving this type also triggers loading its embedded assembly.
+            var vrm10Type = typeof(UniVRM10.Vrm10Instance);
             bool vrm10 = vrm10Type != null && avatar.GetComponentInChildren(vrm10Type, true) != null;
 
             float height = humanoid != null ? MeasureHumanoidHeight(humanoid) : MeasureBounds(avatar);
@@ -62,7 +63,7 @@ namespace AvatarReplacer
             {
                 try
                 {
-                    var type = Type.GetType("UniVRM10.Vrm10Instance, VRM10");
+                    var type = typeof(UniVRM10.Vrm10Instance);
                     var instance = avatar.GetComponentInChildren(type, true);
                     var runtime = type.GetProperty("Runtime", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(instance, null);
                     var expression = runtime?.GetType().GetProperty("Expression", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(runtime, null);

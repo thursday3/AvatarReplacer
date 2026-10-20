@@ -6,7 +6,7 @@ AvatarReplacer replaces Lethal Fantasy's Giantess model with a VRM avatar. It su
 
 - Lethal Fantasy with BepInEx installed.
 - A VRM 0.x or VRM 1.0 avatar with a valid humanoid rig for full pose synchronization.
-- The plugin's UniVRM libraries, included in the `lib/` directory.
+- When building from source, the matching UniVRM assemblies must be present in `lib/`.
 
 ## Install
 
@@ -55,31 +55,33 @@ Copy `_template.json` to `<avatar-file-name>.json` to set avatar-specific scale,
 
 ## Custom expression mapping
 
-The plugin generates an empty expression map for each discovered VRM. Edit the file for the avatar you want to tune:
+The plugin generates a **visible map** of how it drives your VRM's face — every Lethal Fantasy expression is listed, including empty and unused rows, with each row's built-in default shown beside it. Edit the file for the avatar you want to tune:
 
 ```text
 BepInEx/plugins/AvatarReplacer/config/expression_map.<avatar-name>.json
 ```
 
-The shared map is `expression_map.json`. A populated per-avatar map takes precedence over the shared map for that avatar; an empty per-avatar template falls back to the shared map. Existing map files are not overwritten during rescans.
+The shared map is `expression_map.json`. A populated per-avatar map takes precedence over the shared map for that avatar; an empty per-avatar template falls back to the shared map. Map files with real rows are never rewritten during rescans; only missing expression rows are appended and empty skeleton files regenerated.
 
-Each row connects an exact Lethal Fantasy expression name to a VRM expression clip name:
+Each row shows what the mod actually uses:
 
 ```json
 {
   "targetVrm": "avatar1",
   "mappings": [
-    { "gameExpression": "happy eyes", "vrmBlendShape": "JoyfulFace" },
-    { "gameExpression": "a mouth", "vrmBlendShape": "aa" },
-    { "gameExpression": "Blink", "vrmBlendShape": "Blink" }
+    { "gameExpression": "happy eyes", "defaultVrm": "Neutral", "vrmBlendShape": "" },
+    { "gameExpression": "hurt eyes", "defaultVrm": "Sorrow", "vrmBlendShape": "blendShape1.Eyelid_Sad_L" },
+    { "gameExpression": "a mouth", "defaultVrm": "A", "vrmBlendShape": "aa" },
+    { "gameExpression": "Blink", "defaultVrm": "", "vrmBlendShape": "Blink" }
   ]
 }
 ```
 
-- Copy `gameExpression` values exactly from the generated template; names and spelling must match the game expression key.
-- Set `vrmBlendShape` to a clip name present in the VRM. Blender's Shape Keys list is a useful place to inspect model names, but the runtime clip name is what the map resolves against.
-- An empty `vrmBlendShape` leaves the built-in or automatic mapping in place. At least one filled row activates the map.
+- `gameExpression` — the giantess expression key; copy exactly, names and spelling must match the generated template.
+- `defaultVrm` — the built-in default preset the mod uses when you don't override; generated from the same table the runtime reads, so the file always shows the real behaviour.
+- `vrmBlendShape` — the clip actually driven on the VRM. **Empty = use `defaultVrm`; filled = override.** Blender's Shape Keys list is a useful place to inspect model names, but the runtime clip name is what the map resolves against.
 - A filled row replaces the existing mapping for that game expression. `Blink` is routed through the blink handler.
+- At least one filled row activates the map.
 - Edit the map and reload the avatar (F5 rescans and reloads) for changes to take effect.
 
 If a row names a clip that the VRM does not expose, the plugin logs a warning and skips that row. Check `LogOutput.log` under `BepInEx` when troubleshooting mapping or loading issues.
@@ -99,7 +101,9 @@ If a row names a clip that the VRM does not expose, the plugin logs a warning an
 
 ## Build
 
-Build `AvatarReplacer.sln` with the .NET Framework 4.7.2 targeting pack available. The project references the game's managed assemblies and BepInEx assemblies; set `GameDir` or `LF_GAME_DIR` to your Lethal Fantasy installation if the default path does not match your machine.
+Build `AvatarReplacer.sln` with the .NET Framework 4.7.2 targeting pack available. The build embeds the UniVRM assemblies from `lib/` inside `AvatarReplacer.dll`; the plugin loads them from the embedded resources at runtime, so you install one plugin DLL instead of the separate UniVRM DLLs. Keep the exact UniVRM input assemblies in `lib/` while building.
+
+The plugin still uses the game's Unity and managed assemblies and BepInEx/Harmony at runtime; those are not bundled. Set `GameDir` or `LF_GAME_DIR` to your Lethal Fantasy installation if the project default does not match your machine. The VRM avatar files and editable configuration files also remain separate from the plugin DLL.
 
 ## License
 

@@ -38,38 +38,45 @@ The mod was cross-checked against the decompiled game code:
 
 ## 0.1 Custom expression template map (feature)
 
-`config/expression_map.json` (shared) and `config/expression_map.<avatar>.json`
-(per-VRM) let you remap any game expression to any VRM blendshape without
-touching code:
+`config/expression_map.<avatar>.json` (per-VRM) and `config/expression_map.json`
+(shared) are **visible maps** of how the mod drives your VRM's face. Every
+expression the mod can drive is listed — including empty and unused rows —
+with two reference columns:
 
-- **File missing** → a template containing every game expression is written
-  automatically; all `vrmBlendShape` fields are empty and the feature is OFF.
-- **File present but all rows empty** → feature OFF, built-in auto-mapping used.
+- `gameExpression` — the giantess expression (do not edit these names).
+- `defaultVrm` — the built-in default preset the mod uses when you don't
+  override. This is the same table the runtime reads, so a generated file
+  shows **exactly** what the mod does.
+- `vrmBlendShape` — what is actually driven. **Empty = use `defaultVrm`.
+  Filled = override.** To customize, just fill in a blendshape name.
+
+- **Missing keys**: a newer build knows more expressions than an older file?
+  Missing rows are appended automatically at load/scan; nothing else changes.
+- **Stale skeleton** (a `{ "targetVrm": ... }` file with zero mappings rows,
+  the broken output of a previous build): regenerated as a full visible
+  template. Files with real rows are never rewritten, byte for byte.
+- **Feature OFF** while every `vrmBlendShape` is empty: the runtime uses the
+  same default table plus its auto-discovery of model-specific shapes.
 - **Any row filled** → feature ON; each filled row **replaces** the default
   and auto-discovered mapping for that game expression.
-- **Per-VRM files**: on an avatar's first load, a template named
-  `expression_map.<avatarName>.json` is created with `"targetVrm":
-  "<avatarName>"` pre-filled. A filled per-VRM map **replaces** the shared map
-  for that avatar; an empty per-VRM template falls through to the shared map.
-  This avoids conflicts between avatars with different clip sets.
-- **Auto-generation at scan time**: every VRM-scan also creates an empty
-  `expression_map.<avatarName>.json` for each model found in the `vrm/` folder
-  — so after dropping new models in, their templates already exist.
+- **Per-VRM files**: `expression_map.<avatarName>.json`, `targetVrm` guarded,
+  case-insensitive. A filled per-VRM map replaces the shared map for that
+  avatar; an empty per-VRM template falls through to the shared map.
+- **Auto-generation at scan time**: every VRM scan creates the full visible
+  template for each model found in the `vrm/` folder.
   **Existing files are never overwritten or deleted**; a new model only gains
   its own file, and user-edited maps keep every value.
 
-File format (as auto-created — minimal by design: empty `vrmBlendShape`
-follows the default, a filled one overrides):
+File format (as auto-created — every row visible, all overrides empty):
 
 ```json
 {
     "targetVrm": "avatar1",
     "mappings": [
-        { "gameExpression": "happy eyes", "vrmBlendShape": "" },
-        { "gameExpression": "serious eyes", "vrmBlendShape": "" },
-        { "gameExpression": "hurt eyes", "vrmBlendShape": "blendShape1.Eyelid_Sad_L" },
-        { "gameExpression": "Blink", "vrmBlendShape": "" },
-        { "gameExpression": "a mouth", "vrmBlendShape": "aa" }
+        { "gameExpression": "happy eyes", "defaultVrm": "Neutral", "vrmBlendShape": "" },
+        { "gameExpression": "hurt eyes", "defaultVrm": "Sorrow", "vrmBlendShape": "blendShape1.Eyelid_Sad_L" },
+        { "gameExpression": "Blink", "defaultVrm": "", "vrmBlendShape": "" },
+        { "gameExpression": "a mouth", "defaultVrm": "A", "vrmBlendShape": "aa" }
         ...
     ]
 }
@@ -78,7 +85,8 @@ follows the default, a filled one overrides):
 - To find blendshape names, open your `.vrm` in **Blender**
   (Object Data Properties → Shape Keys) and copy the names you want.
   Standard VRM preset names also work (`happy`, `angry`, `sad`,
-  `aa/ih/ou/ee/oh`, `blink`, …).
+  `aa/ih/ou/ee/oh`, `blink`, …) — those are exactly what `defaultVrm`
+  contains.
 - Mapping the special key `"Blink"` reroutes the blink pipeline itself.
 - Unknown target names are logged and skipped at load; the row does not
   break the rest of the map. The map is read when the avatar loads —

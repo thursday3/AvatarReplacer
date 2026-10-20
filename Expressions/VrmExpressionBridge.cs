@@ -334,71 +334,17 @@ namespace AvatarReplacer
             void MapEye(string k, BlendShapePreset v) { eyeExpressionMap[k] = v; }
             void MapMouth(string k, BlendShapePreset v) { mouthExpressionMap[k] = v; }
 
-            MapEye("happy eyes", BlendShapePreset.Neutral);
-            MapEye("serious eyes", BlendShapePreset.Neutral);
-            MapEye("sad eyes", BlendShapePreset.Sorrow);
-            MapEye("angry eyes", BlendShapePreset.Angry);
-            MapEye("hurt eyes", BlendShapePreset.Sorrow);
-            MapEye("smug eyes", BlendShapePreset.Fun);
-            MapEye("shock eyes", BlendShapePreset.Fun);
-            MapEye("vore eyes", BlendShapePreset.Neutral);
-            MapEye("laugh eyes", BlendShapePreset.Neutral);
-            MapEye("cry eyes", BlendShapePreset.Sorrow);
-            MapEye("frown eyes", BlendShapePreset.Sorrow);
-            MapEye("screaming eyes", BlendShapePreset.Fun);
-            MapEye("mad eyes", BlendShapePreset.Angry);
-            MapEye("shy eyes", BlendShapePreset.Neutral);
-            MapEye("embarrased eyes", BlendShapePreset.Neutral);
-            MapEye("neutral tilt eyes", BlendShapePreset.Neutral);
+            // The same truth table that fills the JSON templates drives the
+            // face: what the map file shows is exactly what the mod does.
+            foreach (var def in ExpressionDefaults.All)
+            {
+                if (string.IsNullOrEmpty(def.DefaultPreset)) continue; // no builtin default; left to auto/manual
+                var preset = (BlendShapePreset)Enum.Parse(typeof(BlendShapePreset), def.DefaultPreset);
+                if (def.Slot == ExpressionDefaults.Slot.Eye) MapEye(def.GameExpression, preset);
+                else MapMouth(def.GameExpression, preset);
+            }
 
-            MapEye("anger large", BlendShapePreset.Angry);
-            MapEye("anger small", BlendShapePreset.Angry);
-            MapEye("tears sad", BlendShapePreset.Sorrow);
-            MapEye("tears laugh", BlendShapePreset.Joy);
-            MapEye("tilt", BlendShapePreset.Neutral);
-
-            MapMouth("happy mouth", BlendShapePreset.Joy);
-            MapMouth("serious mouth", BlendShapePreset.Neutral);
-            MapMouth("sad mouth", BlendShapePreset.Sorrow);
-            MapMouth("angry mouth", BlendShapePreset.Angry);
-            MapMouth("hurt mouth", BlendShapePreset.Sorrow);
-            MapMouth("smug mouth", BlendShapePreset.Fun);
-            MapMouth("shock mouth", BlendShapePreset.O);
-
-            MapMouth("smile mouth", BlendShapePreset.Neutral);
-
-            MapMouth("a mouth", BlendShapePreset.A);
-            MapMouth("i mouth", BlendShapePreset.I);
-            MapMouth("u mouth", BlendShapePreset.U);
-            MapMouth("e mouth", BlendShapePreset.E);
-            MapMouth("o mouth", BlendShapePreset.O);
-            MapMouth("vore mouth", BlendShapePreset.A);
-
-            MapMouth("laugh mouth", BlendShapePreset.Joy);
-            MapMouth("cry mouth", BlendShapePreset.Sorrow);
-            MapMouth("frown mouth", BlendShapePreset.Sorrow);
-            MapMouth("screaming mouth", BlendShapePreset.O);
-            MapMouth("mad mouth", BlendShapePreset.Angry);
-            MapMouth("shy mouth", BlendShapePreset.Neutral);
-            MapMouth("embarrased mouth", BlendShapePreset.Neutral);
-            MapMouth("neutral tilt mouth", BlendShapePreset.Neutral);
-
-            MapMouth("Mouth Happy Alt", BlendShapePreset.Joy);
-            MapMouth("Mouth Sad 3", BlendShapePreset.Sorrow);
-            MapMouth("Mouth Screaming", BlendShapePreset.O);
-            MapMouth("Mouth Smug", BlendShapePreset.Fun);
-            MapMouth("Mouth Disgust", BlendShapePreset.Angry);
-            MapMouth("Mouth Empty", BlendShapePreset.Neutral);
-
-            MapEye("Eyes Bored", BlendShapePreset.Neutral);
-            MapEye("Eyes Disgust", BlendShapePreset.Angry);
-            MapEye("Eyes Empty", BlendShapePreset.Neutral);
-            MapEye("Eyes Sad 3", BlendShapePreset.Sorrow);
-            MapEye("Eyes Screaming", BlendShapePreset.Fun);
-            MapEye("Eyes Screaming Alt 2", BlendShapePreset.Fun);
-            MapEye("Eyes Sleepy", BlendShapePreset.Neutral);
-
-            ModLog.Debug("VrmExpressionBridge: Applied default hardcoded mappings (Extended).");
+            ModLog.Debug($"VrmExpressionBridge: Applied default mappings from ExpressionDefaults ({eyeExpressionMap.Count} eyes, {mouthExpressionMap.Count} mouths).");
         }
 
         private void InitializeWeights()

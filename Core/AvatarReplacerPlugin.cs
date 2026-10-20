@@ -13,6 +13,13 @@ namespace AvatarReplacer
     [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
     public class AvatarReplacerPlugin : BaseUnityPlugin
     {
+        static AvatarReplacerPlugin()
+        {
+            // Register before Harmony and UniVRM types are first used. The
+            // referenced UniVRM DLLs are embedded in this plugin assembly.
+            EmbeddedAssemblyLoader.Initialize();
+        }
+
         public static class PluginInfo
         {
             public const string PLUGIN_GUID = "com.user.avatarreplacer";

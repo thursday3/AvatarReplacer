@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using UnityEngine;
 
 namespace AvatarReplacer
@@ -57,9 +59,8 @@ namespace AvatarReplacer
             }
 
             try
-            {
-                string json = File.ReadAllText(configPath);
-                var profile = JsonUtility.FromJson<VrmAvatarProfile>(json);
+            {                    string json = File.ReadAllText(configPath);
+                    var profile = FromJsonString(json);
                 ModLog.Debug($"Loaded per-avatar profile for: {avatarName}");
                 return profile;
             }
@@ -97,7 +98,7 @@ namespace AvatarReplacer
                     smallScaleHipSmoothMultiplier = -1f
                 };
 
-                string json = JsonUtility.ToJson(template, true);
+                string json = template.ToJsonString();
                 File.WriteAllText(templatePath, json);
                 ModLog.Debug($"Created template profile at: {templatePath}");
             }
@@ -105,6 +106,83 @@ namespace AvatarReplacer
             {
                 ModLog.Info($"[WARN] Failed to create template profile: {e.Message}");
             }
+        }
+
+        /// <summary>
+        /// Serialized by hand instead of via UnityEngine.JsonUtility: in this
+        /// game's runtime JsonUtility silently drops fields whose types live
+        /// in this plugin assembly — in-game it wrote profiles WITHOUT the
+        /// positionOffset / rotationOffset objects. This writer emits every
+        /// field, omitting only offsets that are actually null (unset).
+        /// </summary>
+        public string ToJsonString()
+        {
+            var parts = new List<string>
+            {
+                "\"scaleOverride\": " + SimpleJson.Number(scaleOverride)
+            };
+            if (positionOffset != null)
+                parts.Add("\"positionOffset\": " + OffsetJson(positionOffset));
+            if (rotationOffset != null)
+                parts.Add("\"rotationOffset\": " + OffsetJson(rotationOffset));
+            parts.Add("\"springBoneStiffness\": " + SimpleJson.Number(springBoneStiffness));
+            parts.Add("\"springBoneGravityPower\": " + SimpleJson.Number(springBoneGravityPower));
+            parts.Add("\"springBoneDrag\": " + SimpleJson.Number(springBoneDrag));
+            parts.Add("\"scaleMultiplier\": " + SimpleJson.Number(scaleMultiplier));
+            parts.Add("\"smallScaleThresholdMeters\": " + SimpleJson.Number(smallScaleThresholdMeters));
+            parts.Add("\"smallScaleStrideFactorMin\": " + SimpleJson.Number(smallScaleStrideFactorMin));
+            parts.Add("\"smallScaleHipSmoothMultiplier\": " + SimpleJson.Number(smallScaleHipSmoothMultiplier));
+
+            var sb = new StringBuilder(320);
+            sb.Append("{\n");
+            for (int i = 0; i < parts.Count; i++)
+                sb.Append("    ").Append(parts[i]).Append(i + 1 < parts.Count ? ",\n" : "\n");
+            sb.Append("}");
+            return sb.ToString();
+        }
+
+        private static string OffsetJson(Vector3Serializable v)
+        {
+            return "{ \"x\": " + SimpleJson.Number(v.x) +
+                   ", \"y\": " + SimpleJson.Number(v.y) +
+                   ", \"z\": " + SimpleJson.Number(v.z) + " }";
+        }
+
+        /// <summary>
+        /// Tolerant reader: // comments, trailing commas and unknown keys are
+        /// accepted (hand-edited files). Fields absent from the file keep the
+        /// same defaults Unity's FromJson gave them, so existing profile
+        /// files behave identically — with the difference that offsets users
+        /// wrote and Unity silently discarded now actually apply.
+        /// </summary>
+        public static VrmAvatarProfile FromJsonString(string json)
+        {
+            var root = SimpleJson.ParseObject(json);
+            var p = new VrmAvatarProfile();
+
+            p.scaleOverride = SimpleJson.GetFloat(root, "scaleOverride", p.scaleOverride);
+            p.positionOffset = ReadOffset(root, "positionOffset");
+            p.rotationOffset = ReadOffset(root, "rotationOffset");
+            p.springBoneStiffness = SimpleJson.GetFloat(root, "springBoneStiffness", p.springBoneStiffness);
+            p.springBoneGravityPower = SimpleJson.GetFloat(root, "springBoneGravityPower", p.springBoneGravityPower);
+            p.springBoneDrag = SimpleJson.GetFloat(root, "springBoneDrag", p.springBoneDrag);
+            p.scaleMultiplier = SimpleJson.GetFloat(root, "scaleMultiplier", p.scaleMultiplier);
+            p.smallScaleThresholdMeters = SimpleJson.GetFloat(root, "smallScaleThresholdMeters", p.smallScaleThresholdMeters);
+            p.smallScaleStrideFactorMin = SimpleJson.GetFloat(root, "smallScaleStrideFactorMin", p.smallScaleStrideFactorMin);
+            p.smallScaleHipSmoothMultiplier = SimpleJson.GetFloat(root, "smallScaleHipSmoothMultiplier", p.smallScaleHipSmoothMultiplier);
+            return p;
+        }
+
+        private static Vector3Serializable ReadOffset(Dictionary<string, object> root, string key)
+        {
+            object v;
+            if (!root.TryGetValue(key, out v)) return null; // key absent: unset -> global value
+            var obj = v as Dictionary<string, object>;
+            if (obj == null) return null;
+            return new Vector3Serializable(
+                SimpleJson.GetFloat(obj, "x", 0f),
+                SimpleJson.GetFloat(obj, "y", 0f),
+                SimpleJson.GetFloat(obj, "z", 0f));
         }
 
         public float GetEffectiveScale(float globalValue)

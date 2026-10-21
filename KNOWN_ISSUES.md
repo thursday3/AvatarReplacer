@@ -66,6 +66,18 @@ with two reference columns:
   template for each model found in the `vrm/` folder.
   **Existing files are never overwritten or deleted**; a new model only gains
   its own file, and user-edited maps keep every value.
+- **Hand-edited files**: map and profile files are read by the mod's own JSON
+  parser — `//` comments, `/* */` blocks, trailing commas and unknown keys are
+  accepted. A file with broken syntax is reported in `LogOutput.log` and left
+  **byte-for-byte untouched** (fix the syntax, or delete the file to let the
+  mod regenerate a fresh template); it never clobbers the player's edits.
+- **Root cause of the old 3-line files (fixed)**: Unity's `JsonUtility`
+  silently drops fields whose types live in the plugin assembly. In-game it
+  wrote `{ "targetVrm": ... }` skeletons with the entire `mappings` list
+  missing — and avatar-profile files without `positionOffset`/`rotationOffset`,
+  so those overrides never applied either. Map and profile files are now
+  serialized by the mod itself (no dependency on Unity's serializer), and both
+  offsets work as documented.
 
 File format (as auto-created — every row visible, all overrides empty):
 

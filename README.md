@@ -51,7 +51,7 @@ Per-avatar profiles and expression maps live here:
 BepInEx/plugins/AvatarReplacer/config/
 ```
 
-Copy `_template.json` to `<avatar-file-name>.json` to set avatar-specific scale, offsets, or spring-bone values. Profile values take precedence over the corresponding global values.
+Copy `_template.json` to `<avatar-file-name>.json` to set avatar-specific scale, offsets, or spring-bone values. Profile values take precedence over the corresponding global values. (`_template.json` is regenerated once at startup and exists to be copied — it is not read as a profile itself.) Profile and expression-map files accept `//` comments, trailing commas, and unknown keys; a file with broken syntax is reported in `LogOutput.log` and left untouched rather than regenerated over your edits.
 
 ## Custom expression mapping
 
@@ -61,7 +61,7 @@ The plugin generates a **visible map** of how it drives your VRM's face — ever
 BepInEx/plugins/AvatarReplacer/config/expression_map.<avatar-name>.json
 ```
 
-The shared map is `expression_map.json`. A populated per-avatar map takes precedence over the shared map for that avatar; an empty per-avatar template falls back to the shared map. Map files with real rows are never rewritten during rescans; only missing expression rows are appended and empty skeleton files regenerated.
+The shared map is `expression_map.json`. A populated per-avatar map takes precedence over the shared map for that avatar; an empty per-avatar template falls back to the shared map. Map files with real rows are never rewritten during rescans; only missing expression rows are appended and empty skeleton files regenerated. A map file whose JSON is broken is reported in `LogOutput.log` and left byte-for-byte untouched (fix or delete it to regenerate).
 
 Each row shows what the mod actually uses:
 

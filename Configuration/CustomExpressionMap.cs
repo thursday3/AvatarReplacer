@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using UnityEngine;
 
 namespace AvatarReplacer
 {
@@ -116,6 +115,71 @@ namespace AvatarReplacer
         }
 
         /// <summary>
+        /// Serialized by hand instead of via UnityEngine.JsonUtility: in this
+        /// game's runtime JsonUtility silently drops fields whose types live
+        /// in this plugin assembly — in-game it wrote { "targetVrm": "x" }
+        /// skeletons with the whole mappings list missing. This writer emits
+        /// exactly the documented format (4-space indent, one row object per
+        /// expression, in table order).
+        /// </summary>
+        public string ToJsonString()
+        {
+            var sb = new System.Text.StringBuilder(64 + (mappings?.Count ?? 0) * 110);
+            sb.Append("{\n    \"targetVrm\": ").Append(SimpleJson.Quote(targetVrm ?? "")).Append(",\n");
+            sb.Append("    \"mappings\": [");
+
+            bool first = true;
+            if (mappings != null)
+            {
+                foreach (var m in mappings)
+                {
+                    if (m == null) continue;
+                    sb.Append(first ? "\n" : ",\n");
+                    first = false;
+                    sb.Append("        {\n");
+                    sb.Append("            \"gameExpression\": ").Append(SimpleJson.Quote(m.gameExpression)).Append(",\n");
+                    sb.Append("            \"defaultVrm\": ").Append(SimpleJson.Quote(m.defaultVrm)).Append(",\n");
+                    sb.Append("            \"vrmBlendShape\": ").Append(SimpleJson.Quote(m.vrmBlendShape)).Append('\n');
+                    sb.Append("        }");
+                }
+            }
+            sb.Append(first ? "]\n}" : "\n    ]\n}");
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Tolerant reader for hand-edited files: // and /* */ comments,
+        /// trailing commas and unknown keys are accepted; malformed JSON
+        /// throws (callers then leave the file untouched rather than
+        /// destroying the player's edits).
+        /// </summary>
+        public static CustomExpressionMap FromJsonString(string json)
+        {
+            var root = SimpleJson.ParseObject(json);
+            var map = new CustomExpressionMap
+            {
+                targetVrm = SimpleJson.GetString(root, "targetVrm") ?? ""
+            };
+
+            var rows = SimpleJson.GetArray(root, "mappings");
+            if (rows != null)
+            {
+                foreach (var item in rows)
+                {
+                    var row = item as Dictionary<string, object>;
+                    if (row == null) continue;
+                    map.mappings.Add(new CustomExpressionEntry
+                    {
+                        gameExpression = SimpleJson.GetString(row, "gameExpression") ?? "",
+                        defaultVrm = SimpleJson.GetString(row, "defaultVrm") ?? "",
+                        vrmBlendShape = SimpleJson.GetString(row, "vrmBlendShape") ?? ""
+                    });
+                }
+            }
+            return map;
+        }
+
+        /// <summary>
         /// Loads the map for a specific avatar, upgrading stale files on the
         /// way. Resolution order:
         ///  1. per-VRM file expression_map.&lt;avatar&gt;.json (if present and usable)
@@ -192,22 +256,27 @@ namespace AvatarReplacer
 
                 CustomExpressionMap map = null;
                 bool parsed = false;
+                string parseError = null;
                 try
                 {
-                    map = JsonUtility.FromJson<CustomExpressionMap>(File.ReadAllText(path));
+                    map = FromJsonString(File.ReadAllText(path));
                     parsed = map != null;
                 }
-                catch
+                catch (Exception pe)
                 {
+                    parseError = pe.Message;
                     parsed = false;
                 }
 
                 if (!parsed)
                 {
-                    // Raw skeleton (e.g. "{ "targetVrm": "x" }" with no rows
-                    // wrapped */ at all): rewrite as a fresh full template.
-                    CreateTemplate(path, targetVrm, force: true);
-                    return true;
+                    // The file exists but is not readable JSON. It may be a
+                    // hand-edited map with a typo — NEVER destroy user edits:
+                    // leave the bytes alone and say what to fix. (Raw skeletons
+                    // like { "targetVrm": "x" } parse fine and hit the
+                    // zero-row path below instead.)
+                    ModLog.Info($"[WARN] Expression map {Path.GetFileName(path)} is not valid JSON ({parseError}); file left untouched. Fix the syntax or delete the file to regenerate it.");
+                    return false;
                 }
 
                 if (map.mappings == null) map.mappings = new List<CustomExpressionEntry>();
@@ -262,7 +331,7 @@ namespace AvatarReplacer
                 }
                 if (appended || backfilled)
                 {
-                    File.WriteAllText(path, JsonUtility.ToJson(map, true));
+                    File.WriteAllText(path, map.ToJsonString());
                     ModLog.Info($"Expression map {Path.GetFileName(path)} upgraded: {(appended ? "appended missing rows" : "filled defaults")}; overrides kept.");
                 }
                 return appended || backfilled;
@@ -279,7 +348,7 @@ namespace AvatarReplacer
             try
             {
                 string json = File.ReadAllText(path);
-                var map = JsonUtility.FromJson<CustomExpressionMap>(json);
+                var map = FromJsonString(json);
                 if (map == null)
                 {
                     ModLog.Info($"[WARN] {Path.GetFileName(path)} could not be parsed; map ignored.");
@@ -332,7 +401,7 @@ namespace AvatarReplacer
                     });
                 }
 
-                File.WriteAllText(path, JsonUtility.ToJson(template, true));
+                File.WriteAllText(path, template.ToJsonString());
                 ModLog.Info($"Created expression map template at: {path} (defaultVrm = what an empty vrmBlendShape uses; fill vrmBlendShape to override).");
             }
             catch (Exception e)

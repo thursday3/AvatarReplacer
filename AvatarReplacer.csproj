@@ -4,13 +4,13 @@
     <TargetFramework>net472</TargetFramework>
     <AssemblyName>AvatarReplacer</AssemblyName>
     <Description>Avatar Replacer Mod for Lethal Fantasy</Description>
-    <Version>6.0.0</Version>
+    <Version>6.1.0</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
 	
 	<!-- Replace this with your actual game folder, or pass it with -p:GameDir="..." -->
     <GameDir Condition="'$(GameDir)' == '' and '$(LF_GAME_DIR)' != ''">$(LF_GAME_DIR)</GameDir>
-    <GameDir Condition="'$(GameDir)' == ''">/home/abdul/games/LethalFantasy_Alpha_v9_1_0</GameDir>
+    <GameDir Condition="'$(GameDir)' == ''">PUT_YOUR_GAME_PATH_HERE</GameDir>
     <ManagedDir>$(GameDir)\LethalFantasy_Data\Managed</ManagedDir>
     <BepInExCoreDir Condition="'$(BepInExCoreDir)' == ''">$(GameDir)\BepInEx\core</BepInExCoreDir>
     <BepInExCoreDir Condition="'$(BepInExCoreDir)' != '' and !Exists('$(BepInExCoreDir)\\BepInEx.dll') and Exists('$(LegacyBepInExCoreDir)\\BepInEx.dll')">$(LegacyBepInExCoreDir)</BepInExCoreDir>

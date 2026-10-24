@@ -16,6 +16,7 @@ namespace AvatarReplacer
         private bool vrmVisible = true;
         private List<Renderer> originalRenderers = new List<Renderer>();
         private Component originalVariation;
+        private readonly Dictionary<Renderer, bool> rendererEnabledStates = new Dictionary<Renderer, bool>();
 
 
         private float initialScaleRatio = 1f;
@@ -142,6 +143,12 @@ namespace AvatarReplacer
 
             cachedRenderers = GetComponentsInChildren<Renderer>(true);
             propBlock = new MaterialPropertyBlock();
+            rendererEnabledStates.Clear();
+            foreach (var renderer in cachedRenderers)
+            {
+                if (renderer != null)
+                    rendererEnabledStates[renderer] = renderer.enabled;
+            }
 
             ForceMaterialSync();
 
@@ -152,8 +159,11 @@ namespace AvatarReplacer
 
         public void SetVisibility(bool visible)
         {
-            var renderers = GetComponentsInChildren<Renderer>(true);
-            foreach (var r in renderers) r.enabled = visible;
+            foreach (var pair in rendererEnabledStates)
+            {
+                if (pair.Key != null)
+                    pair.Key.enabled = visible && pair.Value;
+            }
         }
 
         private void SetLayerRecursively(GameObject obj, int newLayer)
@@ -212,7 +222,8 @@ namespace AvatarReplacer
                     AvatarReplacerPlugin.ScanForVrms();
                     AvatarReplacerPlugin.ReloadCurrentAvatar();
                 }
-                if (AvatarReplacerPlugin.DiagnosticsKey != null && Input.GetKeyDown(AvatarReplacerPlugin.DiagnosticsKey.Value))
+                if (AvatarReplacerPlugin.IsDebugEnabled && AvatarReplacerPlugin.DiagnosticsKey != null &&
+                    Input.GetKeyDown(AvatarReplacerPlugin.DiagnosticsKey.Value))
                 {
                     VrmDiagnostics.LogAvatar(gameObject, giantess, "manual");
                 }
@@ -220,7 +231,8 @@ namespace AvatarReplacer
 
             if (cachedExpressionBridge != null)
             {
-                bool ctrl = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+                bool ctrl = AvatarReplacerPlugin.IsDebugEnabled &&
+                    (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl));
                 if (ctrl)
                 {
                     if (Input.GetKeyDown(KeyCode.Alpha1)) { cachedExpressionBridge.SetDebugOverride(BlendShapePreset.Neutral); ModLog.Info("Debug Expression: Neutral"); }

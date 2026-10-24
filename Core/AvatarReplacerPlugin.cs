@@ -140,7 +140,8 @@ namespace AvatarReplacer
             VrmFileName = Config.Bind("General", "VrmFileName", "avatar.vrm", "Name of the default VRM file.");
             EnableReplacement = Config.Bind("General", "EnableReplacement", true, "Set to FALSE to disable VRM.");
             HideOriginalMesh = Config.Bind("General", "HideOriginalMesh", true, "Hide the original Giantess mesh.");
-            DebugMode = Config.Bind("General", "DebugMode", false, "Enable verbose debug logging (saved to log file when on).");
+            DebugMode = Config.Bind("General", "DebugMode", false,
+                "Enable verbose debug logging, diagnostic reports, and debug-only hotkeys (F10 and Ctrl+1..0).");
 
             PreviousAvatarKey = Config.Bind("Controls", "PreviousAvatarKey", KeyCode.PageUp, "Key to switch to previous avatar");
             NextAvatarKey = Config.Bind("Controls", "NextAvatarKey", KeyCode.PageDown, "Key to switch to next avatar");

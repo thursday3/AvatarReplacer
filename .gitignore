@@ -12,7 +12,6 @@ out/
 RuntimeShaders/
 
 # Common mod / compiled artifacts
-*.dll
 *.exe
 *.zip
 *.7z
@@ -44,5 +43,6 @@ RuntimeShaders/
 *.dmp
 Thumbs.db
 .DS_Store
-
+Content
+AvatarReplacer.csproj
 

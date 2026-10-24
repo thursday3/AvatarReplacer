@@ -17,6 +17,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Decompiled game sources are reference material only; compile against the
+         game's Assembly-CSharp.dll above to avoid duplicate game types. -->
+    <Compile Remove="Content/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="BepInEx">
       <HintPath>$(BepInExCoreDir)\BepInEx.dll</HintPath>
       <Private>false</Private>

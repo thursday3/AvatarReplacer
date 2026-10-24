@@ -209,10 +209,13 @@ namespace AvatarReplacer
                         if (!map.MatchesAvatar(vrmPath))
                         {
                             ModLog.Info($"Custom map {Path.GetFileName(perVrm)} targets '{map.targetVrm}', not '{Path.GetFileName(vrmPath)}'; ignored.");
-                            return null;
+                            // Treat this per-avatar file as inapplicable and
                         }
-                        ModLog.Info($"Using per-VRM expression map: {Path.GetFileName(perVrm)}");
-                        return map;
+                        else
+                        {
+                            ModLog.Info($"Using per-VRM expression map: {Path.GetFileName(perVrm)}");
+                            return map;
+                        }
                     }
                     // Empty template: fall through to the shared map.
                 }

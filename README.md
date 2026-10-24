@@ -38,8 +38,8 @@ BepInEx/config/com.user.avatarreplacer.cfg
 
 The main options are grouped into these sections:
 
-- **General:** `VrmFileName`, `EnableReplacement`, `HideOriginalMesh`, and `DebugMode`.
-- **Controls:** avatar switching, rescanning, and diagnostic keys.
+- **General:** `VrmFileName`, `EnableReplacement`, `HideOriginalMesh`, and `DebugMode`. Debug mode enables verbose logging, F10 diagnostics, and Ctrl+1..0 expression test overrides.
+- **Controls:** configurable avatar switching, rescanning, and diagnostic keys. Diagnostic actions require `DebugMode=true`; switching and rescanning remain available with debug mode off.
 - **Transform:** global position and rotation offsets, plus the Giantess startup scale multiplier.
 - **SpringBone:** optional authored-physics overrides and opt-in spring-bone generation for models without springs.
 - **SmallScaleLocomotionFix:** stride and hip-smoothing compensation settings.

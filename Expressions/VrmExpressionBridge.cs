@@ -569,7 +569,7 @@ namespace AvatarReplacer
             var expr = sourceExpressionManager.TryGetExpression(gameKey);
             if (expr != null)
             {
-                return Mathf.Clamp01((expr.weight * expr.weightMultiplier) / 100f);
+                return Mathf.Clamp01((GameExpressionAccess.Weight(expr) * GameExpressionAccess.WeightMultiplier(expr)) / 100f);
             }
             return 0f;
         }
@@ -643,7 +643,9 @@ namespace AvatarReplacer
             // Use TryGetExpression: GetExpression throws KeyNotFoundException
             // when the key is absent (verified in game ExpressionManager).
             var blinkExpr = sourceExpressionManager.TryGetExpression("Blink");
-            float targetBlinkWeight = (blinkExpr != null) ? ((blinkExpr.weight * blinkExpr.weightMultiplier) / 100f) : 0f;
+            float targetBlinkWeight = (blinkExpr != null)
+                ? ((GameExpressionAccess.Weight(blinkExpr) * GameExpressionAccess.WeightMultiplier(blinkExpr)) / 100f)
+                : 0f;
             currentBlinkWeight = Mathf.MoveTowards(currentBlinkWeight, targetBlinkWeight, Time.deltaTime * BlinkSmoothingSpeed);
 
             // Template-map override: route blink through the mapped clip.

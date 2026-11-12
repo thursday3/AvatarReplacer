@@ -1,110 +1,156 @@
-# AvatarReplacer 6.0.0
+# AvatarReplacer
 
-AvatarReplacer replaces Lethal Fantasy's Giantess model with a VRM avatar. It supports VRM 0.x and VRM 1.0, synchronizes humanoid animation and expressions, and includes look-at and UniVRM SpringBone support.
+AvatarReplacer replaces selected Lethal Fantasy Giantess models with VRM avatars. It supports VRM 0.x and VRM 1.0, humanoid animation retargeting, facial expression mapping, eye tracking, and UniVRM spring bones.
 
-## Requirements
+## Compatibility
 
-- Lethal Fantasy with BepInEx installed.
-- A VRM 0.x or VRM 1.0 avatar with a valid humanoid rig for full pose synchronization.
-- When building from source, the matching UniVRM assemblies must be present in `lib/`.
+- Target: **Lethal Fantasy public-beta v1.0.1**.
+- Runtime: Unity and BepInEx. Install a BepInEx version compatible with your game installation before installing the mod.
+- Avatar format: VRM 0.x or VRM 1.0. A valid humanoid rig is needed for full animation retargeting.
+- The plugin was compiled against the public-beta v1.0.1 game assembly. Runtime verification on that game version is pending.
 
 ## Install
 
-1. Copy the `AvatarReplacer` plugin folder into `BepInEx/plugins/`.
-2. Put `.vrm` files in `BepInEx/plugins/AvatarReplacer/vrm/`.
-3. Launch the game. The plugin creates its BepInEx config and its per-avatar configuration templates automatically.
+1. Install BepInEx for the game and launch once so it creates its plugin folders.
+2. Build the plugin using the instructions below, or use a prebuilt plugin DLL from a release package.
+3. Copy the resulting `AvatarReplacer.dll` into `LethalFantasy/BepInEx/plugins/`.
+4. Create `LethalFantasy/BepInEx/plugins/AvatarReplacer/vrm/` and put your `.vrm` files there.
+5. Launch the game. The mod creates its config files as it starts and as Giantess characters spawn.
 
-The first avatar is chosen from the available VRMs, using `VrmFileName` when a matching file exists. Press **F5** in game after adding or removing files to rescan the folder.
+The source project packages its selected UniVRM dependencies inside `AvatarReplacer.dll`; do not copy the files in `lib/` separately when installing. This project does **not** use a NuGet assembly-merging package: MSBuild adds the dependency DLLs as embedded resources, and the included `EmbeddedAssemblyLoader` loads them at runtime while preserving their assembly identities. The game assemblies, BepInEx, and Harmony are provided by the game and BepInEx installation.
+
+## Assign avatars
+
+Open `LethalFantasy/BepInEx/config/com.user.avatarreplacer.cfg`. The mod creates a per-character assignment under `[AvatarOverrides]` when each character is detected. The first-run values are blank:
+
+```ini
+[AvatarOverrides]
+Akipo =
+RedTwin =
+BlueTwin =
+```
+
+Enter a VRM **filename** that exists in `BepInEx/plugins/AvatarReplacer/vrm/` to assign it. Leave the value blank to keep that character's original model. All three assignments start blank, and the mod does not ship with personal avatar filenames or a default custom avatar.
+
+The controls below are disabled by default. Set `DebugMode = true` under `[General]` in the BepInEx config before launching the game to enable them. With DebugMode off, assignments remain unchanged and the original model is used for blank entries.
 
 ## Controls
 
 | Key | Action |
 |---|---|
-| PageUp | Switch to the previous VRM |
-| PageDown | Switch to the next VRM |
-| F5 | Rescan the VRM folder and reload the selected avatar |
-| F10 | Write diagnostics for the active avatar to the BepInEx log |
-| Ctrl+1 … Ctrl+0 | Temporarily display a built-in debug expression; release Ctrl to clear it |
+| Page Up | Switch each assigned character to its previous VRM; requires DebugMode |
+| Page Down | Switch each assigned character to its next VRM; requires DebugMode |
+| F5 | Rescan the VRM folder and reload configured assignments; requires DebugMode |
+| F10 | Write avatar diagnostics to the BepInEx log; requires DebugMode |
+| Ctrl+1 through Ctrl+0 | Temporarily apply a debug expression to active replacement avatars; requires DebugMode |
 
-The switch and diagnostic keys can be changed in the BepInEx configuration. PageUp and PageDown are also accepted as built-in avatar-switch keys.
+DebugMode defaults to `false`, so these shortcuts do nothing until the user enables it. The configurable bindings are in the `[Controls]` section. Page Up and Page Down are also recognized as built-in switching keys. Debug expressions map to Neutral, Joy, Angry, Sorrow, Fun, Blink, LookLeft, LookRight, A, and O in number order from 1 to 0. Release Ctrl to clear the temporary override.
 
-## Configuration
+## Settings
 
-The BepInEx settings file is:
+The main settings file is `BepInEx/config/com.user.avatarreplacer.cfg`.
 
-```text
-BepInEx/config/com.user.avatarreplacer.cfg
-```
+| Section | What it controls |
+|---|---|
+| `[General]` | EnableReplacement and DebugMode |
+| `[Controls]` | Previous/next avatar, rescan, and diagnostics keys |
+| `[AvatarOverrides]` | VRM filename for each detected Giantess; blank keeps the game model |
+| `[Transform]` | Shared VRM position and rotation offsets, plus optional Giantess startup scale multiplier |
+| `[SpringBone]` | Authored spring parameters and optional automatic spring generation |
+| `[SmallScaleLocomotionFix]` | Stride and hip-motion compensation for smaller characters |
+| `[ShaderTesting]` | Optional runtime shader override and shader diagnostics |
 
-The main options are grouped into these sections:
+DebugMode is off by default and must be enabled to use avatar switching, rescan, diagnostics, or expression-test hotkeys. A non-empty avatar assignment replaces that character's original model automatically; a blank assignment keeps the original model. There is no separate hide-original-mesh option. Automatic spring generation is also off by default; enable it only when an avatar lacks usable spring bones, because guessed chains can affect unintended bones. Shader overrides only work for shaders already loaded by the game or supplied by a compatible AssetBundle.
 
-- **General:** `VrmFileName`, `EnableReplacement`, `HideOriginalMesh`, and `DebugMode`. Debug mode enables verbose logging, F10 diagnostics, and Ctrl+1..0 expression test overrides.
-- **Controls:** configurable avatar switching, rescanning, and diagnostic keys. Diagnostic actions require `DebugMode=true`; switching and rescanning remain available with debug mode off.
-- **Transform:** global position and rotation offsets, plus the Giantess startup scale multiplier.
-- **SpringBone:** optional authored-physics overrides and opt-in spring-bone generation for models without springs.
-- **SmallScaleLocomotionFix:** stride and hip-smoothing compensation settings.
-- **ShaderTesting:** optional live shader override and shader-bundle path. Only shaders loaded by the game or an available bundle can be used.
+## Per-avatar profiles
 
-Per-avatar profiles and expression maps live here:
+Profiles and expression maps are stored in:
 
 ```text
 BepInEx/plugins/AvatarReplacer/config/
 ```
 
-Copy `_template.json` to `<avatar-file-name>.json` to set avatar-specific scale, offsets, or spring-bone values. Profile values take precedence over the corresponding global values. (`_template.json` is regenerated once at startup and exists to be copied — it is not read as a profile itself.) Profile and expression-map files accept `//` comments, trailing commas, and unknown keys; a file with broken syntax is reported in `LogOutput.log` and left untouched rather than regenerated over your edits.
+The mod creates `_template.json` as a profile example. Copy it to `<vrm-filename-without-extension>.json` to configure one avatar. Profile fields include:
+
+- `scaleOverride`: positive value overrides the global VRM scale setting.
+- `scaleMultiplier`: additional per-avatar scale multiplier; defaults to `1.0`.
+- `positionOffset` and `rotationOffset`: per-avatar offsets with `x`, `y`, and `z` values.
+- `springBoneStiffness`, `springBoneGravityPower`, and `springBoneDrag`: per-avatar spring settings.
+- `smallScaleThresholdMeters`, `smallScaleStrideFactorMin`, and `smallScaleHipSmoothMultiplier`: per-avatar locomotion compensation settings.
+
+Unset profile values use the corresponding global setting. The template is for copying; it is not itself loaded as an avatar profile.
 
 ## Custom expression mapping
 
-The plugin generates a **visible map** of how it drives your VRM's face — every Lethal Fantasy expression is listed, including empty and unused rows, with each row's built-in default shown beside it. Edit the file for the avatar you want to tune:
+The mod creates a shared expression map and maps for individual VRM files in the config directory:
 
 ```text
-BepInEx/plugins/AvatarReplacer/config/expression_map.<avatar-name>.json
+expression_map.json
+expression_map.<vrm-filename>.json
 ```
 
-The shared map is `expression_map.json`. A populated per-avatar map takes precedence over the shared map for that avatar; an empty per-avatar template falls back to the shared map. Map files with real rows are never rewritten during rescans; only missing expression rows are appended and empty skeleton files regenerated. A map file whose JSON is broken is reported in `LogOutput.log` and left byte-for-byte untouched (fix or delete it to regenerate).
-
-Each row shows what the mod actually uses:
+The mod checks the per-avatar map first. If it has no non-empty overrides, the shared map can apply. To add an override, a mapping row needs only `gameExpression` and `vrmBlendShape`:
 
 ```json
 {
-  "targetVrm": "avatar1",
-  "mappings": [
-    { "gameExpression": "happy eyes", "defaultVrm": "Neutral", "vrmBlendShape": "" },
-    { "gameExpression": "hurt eyes", "defaultVrm": "Sorrow", "vrmBlendShape": "blendShape1.Eyelid_Sad_L" },
-    { "gameExpression": "a mouth", "defaultVrm": "A", "vrmBlendShape": "aa" },
-    { "gameExpression": "Blink", "defaultVrm": "", "vrmBlendShape": "Blink" }
-  ]
+  "gameExpression": "happy eyes",
+  "vrmBlendShape": "Happy"
 }
 ```
 
-- `gameExpression` — the giantess expression key; copy exactly, names and spelling must match the generated template.
-- `defaultVrm` — the built-in default preset the mod uses when you don't override; generated from the same table the runtime reads, so the file always shows the real behaviour.
-- `vrmBlendShape` — the clip actually driven on the VRM. **Empty = use `defaultVrm`; filled = override.** Blender's Shape Keys list is a useful place to inspect model names, but the runtime clip name is what the map resolves against.
-- A filled row replaces the existing mapping for that game expression. `Blink` is routed through the blink handler.
-- At least one filled row activates the map.
-- Edit the map and reload the avatar (F5 rescans and reloads) for changes to take effect.
+`gameExpression` must match the game's expression name. `vrmBlendShape` must match a clip exposed by the VRM. If `vrmBlendShape` is empty, that row is ignored as an override; the mod's existing built-in preset mapping or automatic mapping remains in effect. It does not disable that game expression. `Blink` is handled through the blink controller.
 
-If a row names a clip that the VRM does not expose, the plugin logs a warning and skips that row. Check `LogOutput.log` under `BepInEx` when troubleshooting mapping or loading issues.
+Generated map templates also include `defaultVrm` as reference information showing the built-in preset. The runtime does not use that field as an override; when editing, the two fields above define the custom mapping.
 
-## Project layout
+Example empty row (no custom override):
 
-- `Core/` — BepInEx lifecycle, Harmony hooks, and logging.
+```json
+{
+  "gameExpression": "happy eyes",
+  "vrmBlendShape": ""
+}
+```
+
+Use the expression names and spelling from the generated file. If a configured clip does not exist on the avatar, the mod logs a warning and skips that override. Press F5 to reload an avatar after editing its map.
+
+Map files accept `//` comments and trailing commas. The mod preserves existing populated maps while updating missing rows; malformed JSON is logged and left untouched so edits are not overwritten.
+
+## Troubleshooting
+
+- **No avatar appears:** confirm the assignment matches a `.vrm` filename in the `vrm/` folder, enable DebugMode, then press F5. A blank assignment intentionally leaves the original model visible.
+- **The mod does not load:** confirm BepInEx started and check `BepInEx/LogOutput.log` for plugin loading errors.
+- **Animation looks wrong:** check that the VRM has a valid humanoid rig. Use F10 diagnostics with DebugMode enabled for details.
+- **Expressions do not match:** inspect the generated expression map and confirm the VRM clip names. Enable DebugMode and reload with F5 after editing.
+- **Shader appears pink or missing:** the required shader may not be loaded. Review `[ShaderTesting]` and shader diagnostics in the BepInEx log.
+- **Spring bones behave unexpectedly:** disable automatic generation first. Authored VRM spring bones are used by default; automatic generation can be limited with its keyword and root settings.
+
+## Build from source
+
+Requirements: .NET Framework 4.7.2 targeting pack, a compatible .NET SDK, the game's managed assemblies, BepInEx/Harmony assemblies, and the UniVRM reference assemblies in `lib/`.
+
+Build from the repository root, passing the game install directory and BepInEx core directory:
+
+```sh
+dotnet build AvatarReplacer.sln \
+  -p:GameDir="/path/to/LethalFantasy" \
+  -p:BepInExCoreDir="/path/to/LethalFantasy/BepInEx/core"
+```
+
+`GameDir` must contain `LethalFantasy_Data/Managed/Assembly-CSharp.dll`. The project compiles against the installed game assemblies. During the build, the selected UniVRM DLLs from `lib/` are embedded as resources in the plugin; they are not merged into the plugin's assembly metadata. The generated plugin DLL is a local build artifact; it is not included in the source repository.
+
+## Source layout
+
+- `Core/` — BepInEx lifecycle, configuration, Harmony hooks, and logging.
 - `Loading/` — VRM format detection, loading, and material conversion.
-- `Avatar/` — avatar runtime manager and switching controls.
-- `Animation/` — pose synchronization between the game character and VRM.
-- `Expressions/` — expression adapters, mapping, blink, and mesh/jaw fallbacks.
+- `Avatar/` — avatar runtime setup and visibility.
+- `Animation/` — humanoid pose synchronization.
+- `Expressions/` — expression adapters, maps, and fallbacks.
 - `LookAt/` — eye tracking synchronization.
-- `Physics/` — UniVRM SpringBone scaling and optional spring generation.
-- `Configuration/` — avatar profiles, bone mappings, and expression-map templates.
+- `Physics/` — spring-bone controls and optional spring generation.
+- `Configuration/` — avatar profiles, bone mappings, and expression maps.
 - `Diagnostics/` — avatar, material, and shader diagnostics.
-- `lib/` — UniVRM runtime assemblies used by the plugin.
-
-## Build
-
-Build `AvatarReplacer.sln` with the .NET Framework 4.7.2 targeting pack available. The build embeds the UniVRM assemblies from `lib/` inside `AvatarReplacer.dll`; the plugin loads them from the embedded resources at runtime, so you install one plugin DLL instead of the separate UniVRM DLLs. Keep the exact UniVRM input assemblies in `lib/` while building.
-
-The plugin still uses the game's Unity and managed assemblies and BepInEx/Harmony at runtime; those are not bundled. Set `GameDir` or `LF_GAME_DIR` to your Lethal Fantasy installation if the project default does not match your machine. The VRM avatar files and editable configuration files also remain separate from the plugin DLL.
+- `lib/` — UniVRM reference assemblies embedded into the built plugin.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+No license file is currently included in this repository. Check the repository's license terms before redistributing modified source or binaries.

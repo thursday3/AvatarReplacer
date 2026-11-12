@@ -15,7 +15,9 @@ namespace AvatarReplacer
 
         private bool vrmVisible = true;
         private List<Renderer> originalRenderers = new List<Renderer>();
+        private readonly Dictionary<Renderer, bool> originalRendererEnabledStates = new Dictionary<Renderer, bool>();
         private Component originalVariation;
+        private bool originalVariationEnabled = true;
         private readonly Dictionary<Renderer, bool> rendererEnabledStates = new Dictionary<Renderer, bool>();
 
 
@@ -200,56 +202,9 @@ namespace AvatarReplacer
             }
         }
 
-        public void Update()
-        {
+        public void SetDebugOverride(BlendShapePreset preset) => cachedExpressionBridge?.SetDebugOverride(preset);
 
-            if (AvatarReplacerPlugin.PreviousAvatarKey != null)
-            {
-                if (Input.GetKeyDown(AvatarReplacerPlugin.PreviousAvatarKey.Value) || Input.GetKeyDown(KeyCode.PageUp))
-                {
-                    ModLog.Info("Previous Avatar Key Detected");
-                    AvatarReplacerPlugin.SwitchAvatar(-1);
-                }
-                else if (Input.GetKeyDown(AvatarReplacerPlugin.NextAvatarKey.Value) || Input.GetKeyDown(KeyCode.PageDown))
-                {
-                    ModLog.Info("Next Avatar Key Detected");
-                    AvatarReplacerPlugin.SwitchAvatar(1);
-                }
-
-                if (AvatarReplacerPlugin.RescanKey != null && Input.GetKeyDown(AvatarReplacerPlugin.RescanKey.Value))
-                {
-                    ModLog.Info($"Manual Rescan ({AvatarReplacerPlugin.RescanKey.Value}) Detected");
-                    AvatarReplacerPlugin.ScanForVrms();
-                    AvatarReplacerPlugin.ReloadCurrentAvatar();
-                }
-                if (AvatarReplacerPlugin.IsDebugEnabled && AvatarReplacerPlugin.DiagnosticsKey != null &&
-                    Input.GetKeyDown(AvatarReplacerPlugin.DiagnosticsKey.Value))
-                {
-                    VrmDiagnostics.LogAvatar(gameObject, giantess, "manual");
-                }
-            }
-
-            if (cachedExpressionBridge != null)
-            {
-                bool ctrl = AvatarReplacerPlugin.IsDebugEnabled &&
-                    (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl));
-                if (ctrl)
-                {
-                    if (Input.GetKeyDown(KeyCode.Alpha1)) { cachedExpressionBridge.SetDebugOverride(BlendShapePreset.Neutral); ModLog.Info("Debug Expression: Neutral"); }
-                    else if (Input.GetKeyDown(KeyCode.Alpha2)) { cachedExpressionBridge.SetDebugOverride(BlendShapePreset.Joy); ModLog.Info("Debug Expression: Joy"); }
-                    else if (Input.GetKeyDown(KeyCode.Alpha3)) { cachedExpressionBridge.SetDebugOverride(BlendShapePreset.Angry); ModLog.Info("Debug Expression: Angry"); }
-                    else if (Input.GetKeyDown(KeyCode.Alpha4)) { cachedExpressionBridge.SetDebugOverride(BlendShapePreset.Sorrow); ModLog.Info("Debug Expression: Sorrow"); }
-                    else if (Input.GetKeyDown(KeyCode.Alpha5)) { cachedExpressionBridge.SetDebugOverride(BlendShapePreset.Fun); ModLog.Info("Debug Expression: Fun"); }
-                    else if (Input.GetKeyDown(KeyCode.Alpha6)) { cachedExpressionBridge.SetDebugOverride(BlendShapePreset.Blink); ModLog.Info("Debug Expression: Blink"); }
-                    else if (Input.GetKeyDown(KeyCode.Alpha7)) { cachedExpressionBridge.SetDebugOverride(BlendShapePreset.LookLeft); ModLog.Info("Debug Expression: LookLeft"); }
-                    else if (Input.GetKeyDown(KeyCode.Alpha8)) { cachedExpressionBridge.SetDebugOverride(BlendShapePreset.LookRight); ModLog.Info("Debug Expression: LookRight"); }
-                    else if (Input.GetKeyDown(KeyCode.Alpha9)) { cachedExpressionBridge.SetDebugOverride(BlendShapePreset.A); ModLog.Info("Debug Expression: Mouth A"); }
-                    else if (Input.GetKeyDown(KeyCode.Alpha0)) { cachedExpressionBridge.SetDebugOverride(BlendShapePreset.O); ModLog.Info("Debug Expression: Mouth O"); }
-                }
-
-                if (!ctrl) cachedExpressionBridge.ClearDebugOverride();
-            }
-        }
+        public void ClearDebugOverride() => cachedExpressionBridge?.ClearDebugOverride();
 
         private VrmExpressionBridge cachedExpressionBridge;
 
@@ -279,6 +234,25 @@ namespace AvatarReplacer
         {
             originalRenderers = renderers ?? new List<Renderer>();
             originalVariation = variation;
+            originalRendererEnabledStates.Clear();
+            foreach (var renderer in originalRenderers)
+            {
+                if (renderer != null)
+                    originalRendererEnabledStates[renderer] = renderer.enabled;
+            }
+            originalVariationEnabled = GetComponentEnabled(variation, true);
+        }
+
+        private static bool GetComponentEnabled(Component component, bool fallback)
+        {
+            if (component == null) return fallback;
+            var property = component.GetType().GetProperty("enabled");
+            if (property != null && property.CanRead)
+            {
+                try { return (bool)property.GetValue(component, null); }
+                catch { }
+            }
+            return fallback;
         }
 
         /// <summary>
@@ -302,6 +276,22 @@ namespace AvatarReplacer
             }
         }
 
+        public void RestoreOriginalAvatar()
+        {
+            foreach (var renderer in originalRenderers)
+            {
+                if (renderer != null && originalRendererEnabledStates.TryGetValue(renderer, out bool wasEnabled))
+                    renderer.enabled = wasEnabled;
+            }
+
+            if (originalVariation != null)
+            {
+                var enabledProp = originalVariation.GetType().GetProperty("enabled");
+                if (enabledProp != null && enabledProp.CanWrite)
+                    enabledProp.SetValue(originalVariation, originalVariationEnabled);
+            }
+        }
+
         public void ToggleAvatarVisibility()
         {
             vrmVisible = !vrmVisible;
@@ -311,7 +301,7 @@ namespace AvatarReplacer
             foreach (var r in originalRenderers)
             {
                 if (r != null)
-                    r.enabled = !vrmVisible;
+                    r.enabled = !vrmVisible && originalRendererEnabledStates.TryGetValue(r, out bool wasEnabled) && wasEnabled;
             }
 
             if (originalVariation != null)
@@ -319,7 +309,7 @@ namespace AvatarReplacer
                 var varType = originalVariation.GetType();
                 var enabledProp = varType.GetProperty("enabled");
                 if (enabledProp != null)
-                    enabledProp.SetValue(originalVariation, !vrmVisible);
+                    enabledProp.SetValue(originalVariation, !vrmVisible && originalVariationEnabled);
             }
 
             ModLog.Info($"Avatar toggled - VRM visible: {vrmVisible}, Original visible: {!vrmVisible}");

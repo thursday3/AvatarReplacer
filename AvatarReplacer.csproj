@@ -4,7 +4,7 @@
     <TargetFramework>net472</TargetFramework>
     <AssemblyName>AvatarReplacer</AssemblyName>
     <Description>Avatar Replacer Mod for Lethal Fantasy</Description>
-    <Version>6.2.0-beta</Version>
+    <Version>6.3.0</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
 	

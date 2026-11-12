@@ -72,7 +72,7 @@ namespace AvatarReplacer
                 var expr = _expressionManager.TryGetExpression(key);
                 if (expr == null) continue;
 
-                float w = (expr.weight * expr.weightMultiplier) / 100f;
+                float w = (GameExpressionAccess.Weight(expr) * GameExpressionAccess.WeightMultiplier(expr)) / 100f;
                 if (w > 0.01f)
                 {
                     float contribution = w * openAmount;

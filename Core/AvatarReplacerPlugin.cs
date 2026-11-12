@@ -5,6 +5,7 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using UnityEngine;
 using VRM;
 
@@ -24,12 +25,12 @@ namespace AvatarReplacer
         {
             public const string PLUGIN_GUID = "com.user.avatarreplacer";
             public const string PLUGIN_NAME = "AvatarReplacer";
-            public const string PLUGIN_VERSION = "6.0.0";
+            // BepInEx 5 parses the plugin version as System.Version; prerelease
+            // suffixes such as "-beta" make the plugin undiscoverable.
+            public const string PLUGIN_VERSION = "6.2.0";
         }
 
-        private static ConfigEntry<string> VrmFileName;
         private static ConfigEntry<bool> EnableReplacement;
-        private static ConfigEntry<bool> HideOriginalMesh;
         private static ConfigEntry<float> PosX, PosY, PosZ;
         private static ConfigEntry<float> RotX, RotY, RotZ;
         private static ConfigEntry<float> ScaleOverride;
@@ -61,6 +62,8 @@ namespace AvatarReplacer
         /// <summary>Directory holding per-avatar profiles, expression_map.json etc.</summary>
         public static string ConfigDirectory => configDir;
         private static Dictionary<string, VrmAvatarProfile> profileCache = new Dictionary<string, VrmAvatarProfile>();
+        private static readonly Dictionary<string, ConfigEntry<string>> giantessVrmFileSettings =
+            new Dictionary<string, ConfigEntry<string>>(StringComparer.OrdinalIgnoreCase);
 
         public static float SpringBoneStiffnessValue => SpringBoneStiffness != null && !IsDefaultConfigValue(SpringBoneStiffness) ? SpringBoneStiffness.Value : -1f;
         public static float SpringBoneGravityPowerValue => SpringBoneGravityPower != null && !IsDefaultConfigValue(SpringBoneGravityPower) ? SpringBoneGravityPower.Value : -1f;
@@ -86,7 +89,9 @@ namespace AvatarReplacer
 
         private static VrmManager activeVrmManager;
         private static string activeVrmPath = null;
-        private static bool loadingVrm = false;
+        private static bool scanningVrms = false;
+        private static int activeLoadCount = 0;
+        private static int loadGeneration = 0;
 
         private static bool loggedProxyOnDestroyError = false;
 
@@ -112,12 +117,15 @@ namespace AvatarReplacer
 
         private static List<string> availableVrmFiles = new List<string>();
         private static int currentVrmIndex = -1;
-        private static Giantess currentGiantessTarget;
+        private static readonly List<Giantess> giantessTargets = new List<Giantess>();
 
         private static Dictionary<string, VrmManager> loadedVrmCache = new Dictionary<string, VrmManager>();
         private static List<string> cacheAccessOrder = new List<string>();
+        private static readonly Dictionary<int, VrmManager> activeManagersByGiantess = new Dictionary<int, VrmManager>();
+        private static readonly Dictionary<int, string> activePathsByGiantess = new Dictionary<int, string>();
+        private static readonly Dictionary<int, int> loadTokensByGiantess = new Dictionary<int, int>();
+        private static readonly SemaphoreSlim vrmLoadSemaphore = new SemaphoreSlim(1, 1);
         private const int MAX_CACHED_AVATARS = 3;
-        private static int loadToken = 0;
         private static string lastSceneName = null;
 
         public static AvatarReplacerPlugin Instance { get; private set; }
@@ -137,11 +145,9 @@ namespace AvatarReplacer
             Instance = this;
             ModLog.SetLogger(Logger);
 
-            VrmFileName = Config.Bind("General", "VrmFileName", "avatar.vrm", "Name of the default VRM file.");
             EnableReplacement = Config.Bind("General", "EnableReplacement", true, "Set to FALSE to disable VRM.");
-            HideOriginalMesh = Config.Bind("General", "HideOriginalMesh", true, "Hide the original Giantess mesh.");
             DebugMode = Config.Bind("General", "DebugMode", false,
-                "Enable verbose debug logging, diagnostic reports, and debug-only hotkeys (F10 and Ctrl+1..0).");
+                "Enable verbose debug logging and debug hotkeys (avatar switching, rescan, diagnostics, and Ctrl+1..0 expressions).");
 
             PreviousAvatarKey = Config.Bind("Controls", "PreviousAvatarKey", KeyCode.PageUp, "Key to switch to previous avatar");
             NextAvatarKey = Config.Bind("Controls", "NextAvatarKey", KeyCode.PageDown, "Key to switch to next avatar");
@@ -196,7 +202,7 @@ namespace AvatarReplacer
             // Shader testing is intentionally config-driven. Edit ShaderOverride in the
             // BepInEx config while the game is running; the watcher/poll below applies
             // the change to the active VRM without any keyboard test controls.
-            if (!loadingVrm)
+            if (!scanningVrms && activeLoadCount == 0)
             {
                 string current = ShaderOverrideValue ?? string.Empty;
                 if (!string.Equals(current, lastObservedShaderOverride, StringComparison.Ordinal))
@@ -206,11 +212,70 @@ namespace AvatarReplacer
                         VrmShaderTester.ApplyConfiguredOverride();
                 }
             }
+
+            bool debugEnabled = IsDebugEnabled;
+            if (debugEnabled)
+            {
+                if (PreviousAvatarKey != null &&
+                    (Input.GetKeyDown(PreviousAvatarKey.Value) || Input.GetKeyDown(KeyCode.PageUp)))
+                    SwitchAvatar(-1);
+                else if (NextAvatarKey != null &&
+                         (Input.GetKeyDown(NextAvatarKey.Value) || Input.GetKeyDown(KeyCode.PageDown)))
+                    SwitchAvatar(1);
+
+                if (RescanKey != null && Input.GetKeyDown(RescanKey.Value))
+                {
+                    ModLog.Info($"Manual Rescan ({RescanKey.Value}) Detected");
+                    ScanForVrms();
+                    ReloadCurrentAvatar();
+                }
+            }
+
+            var activeManagers = activeManagersByGiantess.Values
+                .Where(manager => manager != null && manager.gameObject != null && manager.gameObject.activeInHierarchy)
+                .Distinct()
+                .ToList();
+
+            if (debugEnabled && DiagnosticsKey != null && Input.GetKeyDown(DiagnosticsKey.Value))
+            {
+                foreach (var manager in activeManagers)
+                    VrmDiagnostics.LogAvatar(manager.gameObject, manager.BoundGiantess, "manual");
+            }
+
+            bool control = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
+            bool useDebugExpressions = debugEnabled && control;
+            if (useDebugExpressions)
+            {
+                BlendShapePreset? preset = null;
+                if (Input.GetKeyDown(KeyCode.Alpha1)) preset = BlendShapePreset.Neutral;
+                else if (Input.GetKeyDown(KeyCode.Alpha2)) preset = BlendShapePreset.Joy;
+                else if (Input.GetKeyDown(KeyCode.Alpha3)) preset = BlendShapePreset.Angry;
+                else if (Input.GetKeyDown(KeyCode.Alpha4)) preset = BlendShapePreset.Sorrow;
+                else if (Input.GetKeyDown(KeyCode.Alpha5)) preset = BlendShapePreset.Fun;
+                else if (Input.GetKeyDown(KeyCode.Alpha6)) preset = BlendShapePreset.Blink;
+                else if (Input.GetKeyDown(KeyCode.Alpha7)) preset = BlendShapePreset.LookLeft;
+                else if (Input.GetKeyDown(KeyCode.Alpha8)) preset = BlendShapePreset.LookRight;
+                else if (Input.GetKeyDown(KeyCode.Alpha9)) preset = BlendShapePreset.A;
+                else if (Input.GetKeyDown(KeyCode.Alpha0)) preset = BlendShapePreset.O;
+
+                if (preset.HasValue)
+                {
+                    foreach (var manager in activeManagers)
+                        manager.SetDebugOverride(preset.Value);
+                    ModLog.Info($"Debug Expression: {preset.Value} (all active GTS avatars)");
+                }
+            }
+            else
+            {
+                foreach (var manager in activeManagers)
+                    manager.ClearDebugOverride();
+            }
         }
 
         public static void ScanForVrms()
         {
-            loadingVrm = true;
+            scanningVrms = true;
+            loadGeneration++;
             string previousActive = "none";
             int previousCount = availableVrmFiles.Count;
 
@@ -225,11 +290,14 @@ namespace AvatarReplacer
             {
                 if (kvp.Value != null && kvp.Value.gameObject != null)
                 {
+                    kvp.Value.RestoreOriginalAvatar();
                     SafeDestroyAvatar(kvp.Value.gameObject);
                 }
             }
             loadedVrmCache.Clear();
             cacheAccessOrder.Clear();
+            activeManagersByGiantess.Clear();
+            activePathsByGiantess.Clear();
             profileCache.Clear();
             activeVrmManager = null;
             activeVrmPath = null;
@@ -264,7 +332,6 @@ namespace AvatarReplacer
             // own template and user-edited maps keep their values.
             CustomExpressionMap.EnsureTemplatesForVrmFolder(vrmDir);
 
-            string defaultName = VrmFileName.Value;
             int foundIndex = -1;
 
             if (previousActive != "none")
@@ -276,10 +343,8 @@ namespace AvatarReplacer
                 }
             }
 
-            if (foundIndex == -1)
-            {
-                foundIndex = availableVrmFiles.FindIndex(f => Path.GetFileName(f).Equals(defaultName, StringComparison.OrdinalIgnoreCase));
-            }
+            if (foundIndex == -1 && availableVrmFiles.Count > 0)
+                foundIndex = 0;
 
             if (foundIndex != -1)
             {
@@ -299,52 +364,57 @@ namespace AvatarReplacer
                 ModLog.Warning("[AvatarReplacer] No VRM files found after rescan.");
             }
 
-            loadingVrm = false;
+            scanningVrms = false;
         }
 
         private static void ClearCache(string reason)
         {
+            loadGeneration++;
             VrmShaderTester.Reset();
             ModLog.Info($"[AvatarReplacer] Clearing cache: {reason}");
             foreach (var kvp in loadedVrmCache)
             {
                 if (kvp.Value != null && kvp.Value.gameObject != null)
                 {
+                    kvp.Value.RestoreOriginalAvatar();
                     SafeDestroyAvatar(kvp.Value.gameObject);
                 }
             }
             loadedVrmCache.Clear();
             cacheAccessOrder.Clear();
+            activeManagersByGiantess.Clear();
+            activePathsByGiantess.Clear();
+            loadTokensByGiantess.Clear();
+            giantessTargets.Clear();
             profileCache.Clear();
             activeVrmManager = null;
             activeVrmPath = null;
-            currentGiantessTarget = null;
         }
 
         public static void ReloadCurrentAvatar()
         {
-            if (currentGiantessTarget == null) return;
+            var targets = GetLiveGiantessTargets();
+            if (targets.Count == 0) return;
 
-            string path = "";
-            if (currentVrmIndex != -1 && currentVrmIndex < availableVrmFiles.Count)
+            foreach (var target in targets)
             {
-                path = availableVrmFiles[currentVrmIndex];
+                string path = GetVrmPathForGiantess(target);
+                if (string.IsNullOrEmpty(path))
+                {
+                    RemoveReplacementForGiantess(target);
+                    continue;
+                }
+                ModLog.Info($"[AvatarReplacer] Reloading {target.name} with {Path.GetFileName(path)}");
+                InitializeVrm(target, path);
             }
-            else
-            {
-
-                path = Path.Combine(Paths.PluginPath, "AvatarReplacer", VrmFileName.Value);
-            }
-
-            ModLog.Info($"[AvatarReplacer] Reloading avatar: {Path.GetFileName(path)}");
-            InitializeVrm(currentGiantessTarget, path);
         }
 
         public static void SwitchAvatar(int direction)
         {
-            if (loadingVrm) return;
+            if (scanningVrms) return;
 
-            if (currentGiantessTarget == null)
+            var targets = GetLiveGiantessTargets();
+            if (targets.Count == 0)
             {
                 ModLog.Info("[WARN] SwitchAvatar called but no Giantess target is active yet.");
                 return;
@@ -356,15 +426,26 @@ namespace AvatarReplacer
                 return;
             }
 
-            currentVrmIndex += direction;
+            foreach (var target in targets)
+            {
+                var setting = GetVrmFileSetting(target);
+                string currentFile = setting.Value?.Trim();
+                if (string.IsNullOrEmpty(currentFile)) continue;
 
-            if (currentVrmIndex < 0) currentVrmIndex = availableVrmFiles.Count - 1;
-            if (currentVrmIndex >= availableVrmFiles.Count) currentVrmIndex = 0;
+                int currentIndex = availableVrmFiles.FindIndex(file =>
+                    string.Equals(Path.GetFileName(file), currentFile, StringComparison.OrdinalIgnoreCase));
+                if (currentIndex < 0)
+                {
+                    ModLog.Warning($"Cannot switch {target.name}: configured VRM '{currentFile}' was not found.");
+                    continue;
+                }
 
-            string newPath = availableVrmFiles[currentVrmIndex];
-            ModLog.Info($"Switching to avatar ({currentVrmIndex + 1}/{availableVrmFiles.Count}): {Path.GetFileName(newPath)}");
-
-            InitializeVrm(currentGiantessTarget, newPath);
+                int nextIndex = (currentIndex + (direction < 0 ? -1 : 1) + availableVrmFiles.Count) % availableVrmFiles.Count;
+                string nextPath = availableVrmFiles[nextIndex];
+                setting.Value = Path.GetFileName(nextPath);
+                ModLog.Info($"Switching {target.name} to avatar ({nextIndex + 1}/{availableVrmFiles.Count}): {Path.GetFileName(nextPath)}");
+                InitializeVrm(target, nextPath);
+            }
         }
 
         [HarmonyPatch(typeof(Giantess), "Awake")]
@@ -392,7 +473,8 @@ namespace AvatarReplacer
             }
 
             ModLog.Info($"Targeting giantess: {__instance.gameObject.name}");
-            currentGiantessTarget = __instance;
+            if (!giantessTargets.Contains(__instance))
+                giantessTargets.Add(__instance);
 
             if (ScaleOverride != null && ScaleOverride.Value > 0.0001f)
             {
@@ -402,14 +484,12 @@ namespace AvatarReplacer
                 ModLog.Info($"ScaleOverride applied: GTS scale {originalScale:F3} * {ScaleOverride.Value:F3} = {__instance.scale:F3}");
             }
 
-            string path = "";
-            if (currentVrmIndex != -1 && currentVrmIndex < availableVrmFiles.Count)
+            string path = GetVrmPathForGiantess(__instance);
+            if (string.IsNullOrEmpty(path))
             {
-                path = availableVrmFiles[currentVrmIndex];
-            }
-            else
-            {
-                 path = Path.Combine(Paths.PluginPath, "AvatarReplacer", VrmFileName.Value);
+                ModLog.Info($"No VRM configured for {__instance.name}; keeping the original game model.");
+                RemoveReplacementForGiantess(__instance);
+                return;
             }
 
             if (Instance != null && Instance.isActiveAndEnabled)
@@ -438,90 +518,231 @@ namespace AvatarReplacer
             _ = InitializeVrmAsync(giantess, vrmPath);
         }
 
+        private static ConfigEntry<string> GetVrmFileSetting(Giantess giantess)
+        {
+            string name = GetGiantessConfigName(giantess);
+            string settingName = name;
+            if (!giantessVrmFileSettings.TryGetValue(settingName, out var setting))
+            {
+                setting = Instance.Config.Bind(
+                    "AvatarOverrides",
+                    settingName,
+                    string.Empty,
+                    $"VRM filename for {giantess.name}. Leave empty to keep this Giantess's original game model.");
+                giantessVrmFileSettings[settingName] = setting;
+            }
+            return setting;
+        }
+
+        private static string GetGiantessConfigName(Giantess giantess)
+        {
+            string name = giantess != null && giantess.gameObject != null ? giantess.gameObject.name : "Giantess";
+            const string cloneSuffix = "(Clone)";
+            if (name.EndsWith(cloneSuffix, StringComparison.OrdinalIgnoreCase))
+                name = name.Substring(0, name.Length - cloneSuffix.Length).TrimEnd();
+
+            if (name.StartsWith("Akipo Giantess", StringComparison.OrdinalIgnoreCase)) return "Akipo";
+            if (name.StartsWith("Red Twin Giantess", StringComparison.OrdinalIgnoreCase)) return "RedTwin";
+            if (name.StartsWith("Blue Twin Giantess", StringComparison.OrdinalIgnoreCase)) return "BlueTwin";
+
+            var safe = new System.Text.StringBuilder(name.Length);
+            bool lastWasSeparator = false;
+            foreach (char c in name)
+            {
+                if (char.IsLetterOrDigit(c))
+                {
+                    safe.Append(c);
+                    lastWasSeparator = false;
+                }
+                else if (!lastWasSeparator)
+                {
+                    safe.Append('_');
+                    lastWasSeparator = true;
+                }
+            }
+            string result = safe.ToString().Trim('_');
+            return string.IsNullOrEmpty(result) ? "Giantess" : result;
+        }
+
+        private static string GetVrmPathForGiantess(Giantess giantess)
+        {
+            if (giantess == null) return null;
+            string fileName = GetVrmFileSetting(giantess).Value?.Trim();
+            if (string.IsNullOrEmpty(fileName)) return null;
+            if (!string.Equals(Path.GetFileName(fileName), fileName, StringComparison.Ordinal))
+            {
+                ModLog.Warning($"VRM assignment for {giantess.name} must be a filename, not a path: '{fileName}'.");
+                return null;
+            }
+
+            string discovered = availableVrmFiles.FirstOrDefault(file =>
+                string.Equals(Path.GetFileName(file), fileName, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(discovered)) return discovered;
+
+            string legacyPath = Path.Combine(Paths.PluginPath, "AvatarReplacer", fileName);
+            if (File.Exists(legacyPath)) return legacyPath;
+
+            ModLog.Warning($"VRM '{fileName}' configured for {giantess.name} was not found; leaving its original model visible.");
+            return null;
+        }
+
+        private static void RemoveReplacementForGiantess(Giantess giantess)
+        {
+            if (giantess == null) return;
+            int targetId = GetTargetId(giantess);
+            NextLoadToken(targetId);
+            string prefix = targetId + "|";
+            var keys = loadedVrmCache.Keys.Where(key => key.StartsWith(prefix, StringComparison.Ordinal)).ToList();
+            bool removingActiveManager = activeManagersByGiantess.TryGetValue(targetId, out var activeForTarget) &&
+                activeForTarget != null && activeForTarget == activeVrmManager;
+
+            if (activeManagersByGiantess.TryGetValue(targetId, out var manager) && manager != null)
+                manager.RestoreOriginalAvatar();
+
+            if (removingActiveManager)
+                VrmShaderTester.Reset();
+
+            foreach (string key in keys)
+            {
+                if (loadedVrmCache.TryGetValue(key, out var cached) && cached != null)
+                    SafeDestroyAvatar(cached.gameObject);
+                loadedVrmCache.Remove(key);
+                cacheAccessOrder.Remove(key);
+            }
+
+            activeManagersByGiantess.Remove(targetId);
+            activePathsByGiantess.Remove(targetId);
+            if (removingActiveManager)
+            {
+                var next = activeManagersByGiantess.FirstOrDefault(pair =>
+                    pair.Value != null && pair.Value.gameObject != null && pair.Value.gameObject.activeSelf);
+                activeVrmManager = next.Value;
+                activeVrmPath = next.Value != null && activePathsByGiantess.TryGetValue(next.Key, out var nextPath)
+                    ? nextPath : null;
+                if (activeVrmManager != null)
+                    VrmShaderTester.SetTarget(activeVrmManager.gameObject);
+            }
+        }
+
+        private static List<Giantess> GetLiveGiantessTargets()
+        {
+            giantessTargets.RemoveAll(target => target == null);
+            return new List<Giantess>(giantessTargets);
+        }
+
+        private static int GetTargetId(Giantess giantess) => giantess.GetInstanceID();
+
+        private static string GetAvatarCacheKey(Giantess giantess, string path)
+        {
+            return GetTargetId(giantess) + "|" + Path.GetFullPath(path);
+        }
+
+        private static int NextLoadToken(int targetId)
+        {
+            loadTokensByGiantess.TryGetValue(targetId, out int token);
+            token++;
+            loadTokensByGiantess[targetId] = token;
+            return token;
+        }
+
+        private static bool IsCurrentLoad(int targetId, int token, int generation)
+        {
+            return generation == loadGeneration &&
+                   loadTokensByGiantess.TryGetValue(targetId, out int currentToken) &&
+                   currentToken == token;
+        }
+
         private static async System.Threading.Tasks.Task InitializeVrmAsync(Giantess giantess, string vrmPath)
         {
-            if (loadingVrm) return;
-
-            int myToken = ++loadToken;
-
             if (giantess == null)
             {
                 ModLog.Info("[WARN] InitializeVrm called with null/destroyed Giantess.");
                 return;
             }
 
-            try
+            int targetId = GetTargetId(giantess);
+            int myToken = NextLoadToken(targetId);
+            int myGeneration = loadGeneration;
+            string path = vrmPath;
+            string cacheKey = GetAvatarCacheKey(giantess, path);
+
+            if (loadedVrmCache.TryGetValue(cacheKey, out var cached) && cached != null)
             {
-                string path = vrmPath;
-
-                if (loadedVrmCache.ContainsKey(path) && loadedVrmCache[path] != null)
+                ModLog.Debug($"Cache Hit! Enabling {Path.GetFileName(path)} for {giantess.name}");
+                if (cached.BoundGiantess == giantess)
                 {
-                    ModLog.Debug($"Cache Hit! Enabling: {Path.GetFileName(path)}");
-                    var cached = loadedVrmCache[path];
-                    if (cached.BoundGiantess != giantess)
-                    {
-                        ModLog.Info($"[AvatarReplacer] Cached avatar bound to different Giantess. Rebuilding for current target.");
-                        SafeDestroyAvatar(cached.gameObject);
-                        loadedVrmCache.Remove(path);
-                    }
-                    else
-                    {
+                    if (activeManagersByGiantess.TryGetValue(targetId, out var previous) &&
+                        previous != null && previous != cached)
+                        previous.gameObject.SetActive(false);
 
-                        if (activeVrmManager != null)
-                        {
-                            activeVrmManager.gameObject.SetActive(false);
-                        }
+                    activeVrmManager = cached;
+                    activeVrmPath = path;
+                    activeManagersByGiantess[targetId] = cached;
+                    activePathsByGiantess[targetId] = path;
+                    cached.gameObject.SetActive(true);
+                    cacheAccessOrder.Remove(cacheKey);
+                    cacheAccessOrder.Add(cacheKey);
 
-                        activeVrmManager = cached;
-                        activeVrmPath = path;
-                        activeVrmManager.gameObject.SetActive(true);
+                    cached.SetVisibility(true);
+                    cached.EnsureOriginalAvatarHidden();
+                    VrmShaderTester.SetTarget(cached.gameObject);
 
-                        cacheAccessOrder.Remove(path);
-                        cacheAccessOrder.Add(path);
+                    var cachedProfile = GetOrLoadProfile(path);
+                    Vector3 pos = cachedProfile != null
+                        ? cachedProfile.GetEffectivePosition(new Vector3(PosX.Value, PosY.Value, PosZ.Value))
+                        : new Vector3(PosX.Value, PosY.Value, PosZ.Value);
+                    Vector3 rot = cachedProfile != null
+                        ? cachedProfile.GetEffectiveRotation(new Vector3(RotX.Value, RotY.Value, RotZ.Value))
+                        : new Vector3(RotX.Value, RotY.Value, RotZ.Value);
 
-                        activeVrmManager.SetVisibility(true);
-                        if (HideOriginalMesh.Value)
-                            activeVrmManager.EnsureOriginalAvatarHidden();
-                        VrmShaderTester.SetTarget(activeVrmManager.gameObject);
-
-                        var cachedProfile = GetOrLoadProfile(path);
-                        Vector3 pos = cachedProfile != null
-                            ? cachedProfile.GetEffectivePosition(new Vector3(PosX.Value, PosY.Value, PosZ.Value))
-                            : new Vector3(PosX.Value, PosY.Value, PosZ.Value);
-                        Vector3 rot = cachedProfile != null
-                            ? cachedProfile.GetEffectiveRotation(new Vector3(RotX.Value, RotY.Value, RotZ.Value))
-                            : new Vector3(RotX.Value, RotY.Value, RotZ.Value);
-
-                        activeVrmManager.ApplyGlobalPosition(pos);
-                        activeVrmManager.ApplyGlobalOffset(rot);
-
-                        return;
-                    }
+                    cached.ApplyGlobalPosition(pos);
+                    cached.ApplyGlobalOffset(rot);
+                    return;
                 }
 
-                loadingVrm = true;
+                ModLog.Warning($"Cached VRM for {giantess.name} was bound to a different Giantess; discarding it.");
+                SafeDestroyAvatar(cached.gameObject);
+                loadedVrmCache.Remove(cacheKey);
+                cacheAccessOrder.Remove(cacheKey);
+            }
+
+            activeLoadCount++;
+
+            try
+            {
                 ModLog.Info($"Loading VRM from: {path}");
 
                 if (!File.Exists(path))
                 {
                     ModLog.Info($"[WARN] File not found: {path}");
-                    loadingVrm = false;
                     return;
                 }
 
-                GameObject vrmRoot = await VrmLoader.LoadVrmAsync(path);
+                GameObject vrmRoot;
+                await vrmLoadSemaphore.WaitAsync();
+                try
+                {
+                    if (!IsCurrentLoad(targetId, myToken, myGeneration) || giantess == null)
+                    {
+                        ModLog.Info("[WARN] VRM load became stale before it started; aborting.");
+                        return;
+                    }
+                    vrmRoot = await VrmLoader.LoadVrmAsync(path);
+                }
+                finally
+                {
+                    vrmLoadSemaphore.Release();
+                }
 
-                if (myToken != loadToken || giantess == null || giantess != currentGiantessTarget)
+                if (!IsCurrentLoad(targetId, myToken, myGeneration) || giantess == null)
                 {
                     if (vrmRoot != null) SafeDestroyAvatar(vrmRoot);
-                    loadingVrm = false;
                     ModLog.Info("[WARN] VRM load became stale; aborting.");
                     return;
                 }
 
                 if (vrmRoot == null)
                 {
-                    loadingVrm = false;
                     return;
                 }
 
@@ -547,7 +768,6 @@ namespace AvatarReplacer
                 if (giantess == null)
                 {
                     SafeDestroyAvatar(vrmRoot);
-                    loadingVrm = false;
                     ModLog.Info("[WARN] Giantess target was destroyed while loading VRM; aborting.");
                     return;
                 }
@@ -557,7 +777,6 @@ namespace AvatarReplacer
                 {
                     ModLog.Error("No Animator on VRM root or children; aborting. Check that the VRM has a valid humanoid rig.");
                     SafeDestroyAvatar(vrmRoot);
-                    loadingVrm = false;
                     return;
                 }
 
@@ -602,43 +821,40 @@ namespace AvatarReplacer
                 if (giantess.scale > 0.01f)
                     ModLog.Debug($"Giantess.scale: {giantess.scale:F3}. VRM will inherit parent scale automatically.");
 
+                if (activeManagersByGiantess.TryGetValue(targetId, out var previousManager) &&
+                    previousManager != null && previousManager.gameObject != null)
+                    previousManager.gameObject.SetActive(false);
+
                 activeVrmManager = vrmRoot.AddComponent<VrmManager>();
                 activeVrmPath = path;
 
-                foreach (var manager in loadedVrmCache.Values)
+                activeManagersByGiantess[targetId] = activeVrmManager;
+                activePathsByGiantess[targetId] = path;
+                int cacheLimit = Math.Max(MAX_CACHED_AVATARS, GetLiveGiantessTargets().Count * MAX_CACHED_AVATARS);
+                while (loadedVrmCache.Count >= cacheLimit && cacheAccessOrder.Count > 0)
                 {
-                    if (manager != null) manager.gameObject.SetActive(false);
-                }
+                    int inactiveIndex = cacheAccessOrder.FindIndex(key =>
+                        !loadedVrmCache.TryGetValue(key, out var manager) || manager == null ||
+                        manager.gameObject == null || !manager.gameObject.activeSelf);
+                    if (inactiveIndex < 0)
+                        break;
 
-                while (loadedVrmCache.Count >= MAX_CACHED_AVATARS && cacheAccessOrder.Count > 0)
-                {
-                    string oldestPath = cacheAccessOrder[0];
-                    cacheAccessOrder.RemoveAt(0);
-
-                    if (loadedVrmCache.TryGetValue(oldestPath, out var oldManager))
+                    string oldestKey = cacheAccessOrder[inactiveIndex];
+                    cacheAccessOrder.RemoveAt(inactiveIndex);
+                    if (loadedVrmCache.TryGetValue(oldestKey, out var oldManager))
                     {
                         if (oldManager != null && oldManager.gameObject != null)
                         {
-                            ModLog.Debug($"LRU Eviction: Destroying {Path.GetFileName(oldestPath)} to free memory");
-
+                            ModLog.Debug($"LRU Eviction: Destroying {Path.GetFileName(oldestKey)} to free memory");
                             SafeDestroyAvatar(oldManager.gameObject);
                         }
-                        loadedVrmCache.Remove(oldestPath);
+                        loadedVrmCache.Remove(oldestKey);
                     }
                 }
 
-                if (!loadedVrmCache.ContainsKey(path))
-                {
-                    loadedVrmCache.Add(path, activeVrmManager);
-                    cacheAccessOrder.Add(path);
-                }
-                else
-                {
-
-                    loadedVrmCache[path] = activeVrmManager;
-                    cacheAccessOrder.Remove(path);
-                    cacheAccessOrder.Add(path);
-                }
+                loadedVrmCache[cacheKey] = activeVrmManager;
+                cacheAccessOrder.Remove(cacheKey);
+                cacheAccessOrder.Add(cacheKey);
 
                 string configPath = Path.Combine(Paths.PluginPath, "AvatarReplacer", "bone_mapping.json");
                 var config = BoneMappingConfig.LoadOrCreateDefault(configPath);
@@ -654,15 +870,7 @@ namespace AvatarReplacer
 
                 SyncShadowSettings(giantess, vrmRoot);
 
-                List<Renderer> hiddenRenderers = new List<Renderer>();
-                Component variation = null;
-
-                if (HideOriginalMesh.Value)
-                {
-                    (hiddenRenderers, variation) = HideOriginalAvatar(giantess, vrmRoot.transform);
-                }
-
-                activeVrmManager.SetOriginalRenderers(hiddenRenderers, variation);
+                HideOriginalAvatar(giantess, vrmRoot.transform, activeVrmManager);
 
                 ModLog.Info("VRM Replacement successful.");
             }
@@ -673,7 +881,7 @@ namespace AvatarReplacer
             }
             finally
             {
-                loadingVrm = false;
+                activeLoadCount = Math.Max(0, activeLoadCount - 1);
             }
         }
 
@@ -735,7 +943,7 @@ namespace AvatarReplacer
             ModLog.Debug($"Synchronized shadow settings from {template.name}");
         }
 
-        private static (List<Renderer>, Component) HideOriginalAvatar(Giantess giantess, Transform exclude)
+        private static void HideOriginalAvatar(Giantess giantess, Transform exclude, VrmManager manager)
         {
             var renderers = giantess.GetComponentsInChildren<Renderer>(true);
             var hiddenRenderers = new List<Renderer>();
@@ -745,11 +953,17 @@ namespace AvatarReplacer
                 if (!r.transform.IsChildOf(exclude))
                 {
                     hiddenRenderers.Add(r);
-                    r.enabled = false;
                 }
             }
 
             Component variation = giantess.variation;
+            manager.SetOriginalRenderers(hiddenRenderers, variation);
+            foreach (var renderer in hiddenRenderers)
+            {
+                if (renderer != null)
+                    renderer.enabled = false;
+            }
+
             if (variation != null)
             {
                 var varType = variation.GetType();
@@ -758,7 +972,6 @@ namespace AvatarReplacer
                     enabledProp.SetValue(variation, false);
             }
 
-            return (hiddenRenderers, variation);
         }
 
         private static VrmAvatarProfile GetOrLoadProfile(string vrmPath)

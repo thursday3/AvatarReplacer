@@ -22,6 +22,7 @@ namespace AvatarReplacer
 
         private HashSet<string> _appliedThisFrame = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private Dictionary<string, float> _lastAppliedWeights = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        private readonly List<string> _scratchKeys = new List<string>();
 
         private BlendshapeCategory _activeCategory = BlendshapeCategory.Unknown;
         private float _activeCategoryWeight = 0f;
@@ -136,27 +137,26 @@ namespace AvatarReplacer
 
         public void EndFrame()
         {
+            // Snapshot keys into a reusable list because entries may be removed
+            // while weights decay. Avoid allocating LINQ lists every frame.
+            _scratchKeys.Clear();
+            foreach (var key in _lastAppliedWeights.Keys)
+                _scratchKeys.Add(key);
 
-            var keysToRemove = new List<string>();
-
-            foreach (var key in _lastAppliedWeights.Keys.ToList())
+            foreach (var key in _scratchKeys)
             {
-                float val = _lastAppliedWeights[key];
+                if (!_lastAppliedWeights.TryGetValue(key, out float val)) continue;
                 if (!_appliedThisFrame.Contains(key) && val > 0.001f)
                 {
-
                     float decayed = Mathf.MoveTowards(val, 0f, Time.deltaTime * 8f);
                     SetBlendshapeDirectly(key, decayed);
 
                     if (decayed <= 0.001f)
-                        keysToRemove.Add(key);
+                        _lastAppliedWeights.Remove(key);
                     else
                         _lastAppliedWeights[key] = decayed;
                 }
             }
-
-            foreach (var key in keysToRemove)
-                _lastAppliedWeights.Remove(key);
         }
 
         public void ApplyWithPriority(string standardKey, float value, BlendshapeCategory requestedCategory)

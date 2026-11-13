@@ -49,6 +49,8 @@ namespace AvatarReplacer
         private BoneLink rootBoneLink;
 
         private Vrm10Instance vrm10Instance;
+        private VrmSpringBoneController springBoneController;
+        private bool springBoneControllerLookupDone;
 
         [System.Serializable]
         public class BoneLink
@@ -350,7 +352,13 @@ namespace AvatarReplacer
                 }
             }
 
-            var physicsController = GetComponent<VrmSpringBoneController>();
+            if (!springBoneControllerLookupDone)
+            {
+                springBoneController = GetComponent<VrmSpringBoneController>();
+                springBoneControllerLookupDone = true;
+            }
+
+            var physicsController = springBoneController;
             if (physicsController != null && physicsController.enabled)
             {
                 physicsController.ProcessAfterAnimationFrame();

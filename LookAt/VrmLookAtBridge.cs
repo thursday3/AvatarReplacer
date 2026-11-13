@@ -12,6 +12,7 @@ namespace AvatarReplacer
         private IVrmExpressionAdapter expressionAdapter;
         private Vrm10Instance vrm10Instance;
         private MethodInfo setLookAtYawPitchMethod;
+        private System.Action<float, float> setLookAtYawPitchAction;
         private bool vrm10LookAtChecked;
 
         private float saccadeTimer = 0f;
@@ -56,6 +57,7 @@ namespace AvatarReplacer
         private bool useEyeBoneFallback;
         private Component vrm0LookAt;
         private MethodInfo vrm0SetLookAtYawPitch;
+        private System.Action<float, float> vrm0SetLookAtYawPitchAction;
 
         public void Initialize(Giantess giantess, IVrmHeadAdapter headAdapter, IVrmExpressionAdapter expressionAdapter)
         {
@@ -72,7 +74,18 @@ namespace AvatarReplacer
             {
                 vrm0LookAt = GetComponent(vrm0Type) ?? GetComponentInChildren(vrm0Type, true);
                 if (vrm0LookAt != null)
+                {
                     vrm0SetLookAtYawPitch = vrm0Type.GetMethod("SetLookAtYawPitch", BindingFlags.Public | BindingFlags.Instance);
+                    if (vrm0SetLookAtYawPitch != null)
+                    {
+                        try
+                        {
+                            vrm0SetLookAtYawPitchAction = (System.Action<float, float>)System.Delegate.CreateDelegate(
+                                typeof(System.Action<float, float>), vrm0LookAt, vrm0SetLookAtYawPitch);
+                        }
+                        catch { /* Keep the reflection fallback for unusual UniVRM signatures. */ }
+                    }
+                }
             }
 
             if (expressionAdapter == null)
@@ -242,8 +255,22 @@ namespace AvatarReplacer
                 setLookAtYawPitchMethod = type.GetMethod("SetLookAtYawPitch", BindingFlags.Public | BindingFlags.Instance, null, new[] { typeof(float), typeof(float) }, null);
                 if (setLookAtYawPitchMethod == null)
                     setLookAtYawPitchMethod = type.GetMethod("SetLookAtYawPitch", BindingFlags.Public | BindingFlags.Instance);
+                if (setLookAtYawPitchMethod != null)
+                {
+                    try
+                    {
+                        setLookAtYawPitchAction = (System.Action<float, float>)System.Delegate.CreateDelegate(
+                            typeof(System.Action<float, float>), lookAt, setLookAtYawPitchMethod);
+                    }
+                    catch { /* Keep the reflection fallback for unusual UniVRM signatures. */ }
+                }
             }
-            if (setLookAtYawPitchMethod != null)
+            if (setLookAtYawPitchAction != null)
+            {
+                // UniVRM10 accepts degrees and converts internally.
+                setLookAtYawPitchAction(yawDeg, pitchDeg);
+            }
+            else if (setLookAtYawPitchMethod != null)
             {
                 try
                 {
@@ -265,7 +292,12 @@ namespace AvatarReplacer
                 // Legacy VRMLookAtHead expects radians and a down-positive pitch
                 // (the convention this class originally computed). Our smoothPitch
                 // is up-positive, so negate before passing it on.
-                vrm0SetLookAtYawPitch.Invoke(vrm0LookAt, new object[] { yawDeg * Mathf.Deg2Rad, -pitchDegUp * Mathf.Deg2Rad });
+                float yawRadians = yawDeg * Mathf.Deg2Rad;
+                float pitchRadians = -pitchDegUp * Mathf.Deg2Rad;
+                if (vrm0SetLookAtYawPitchAction != null)
+                    vrm0SetLookAtYawPitchAction(yawRadians, pitchRadians);
+                else
+                    vrm0SetLookAtYawPitch.Invoke(vrm0LookAt, new object[] { yawRadians, pitchRadians });
             }
             catch (System.Exception) { }
         }

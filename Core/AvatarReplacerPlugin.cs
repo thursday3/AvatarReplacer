@@ -122,6 +122,8 @@ namespace AvatarReplacer
         private static Dictionary<string, VrmManager> loadedVrmCache = new Dictionary<string, VrmManager>();
         private static List<string> cacheAccessOrder = new List<string>();
         private static readonly Dictionary<int, VrmManager> activeManagersByGiantess = new Dictionary<int, VrmManager>();
+        private static readonly List<VrmManager> activeManagerScratch = new List<VrmManager>();
+        private static readonly HashSet<VrmManager> activeManagerSet = new HashSet<VrmManager>();
         private static readonly Dictionary<int, string> activePathsByGiantess = new Dictionary<int, string>();
         private static readonly Dictionary<int, int> loadTokensByGiantess = new Dictionary<int, int>();
         private static readonly SemaphoreSlim vrmLoadSemaphore = new SemaphoreSlim(1, 1);
@@ -231,14 +233,18 @@ namespace AvatarReplacer
                 }
             }
 
-            var activeManagers = activeManagersByGiantess.Values
-                .Where(manager => manager != null && manager.gameObject != null && manager.gameObject.activeInHierarchy)
-                .Distinct()
-                .ToList();
+            activeManagerScratch.Clear();
+            activeManagerSet.Clear();
+            foreach (var manager in activeManagersByGiantess.Values)
+            {
+                if (manager != null && manager.gameObject != null && manager.gameObject.activeInHierarchy &&
+                    activeManagerSet.Add(manager))
+                    activeManagerScratch.Add(manager);
+            }
 
             if (debugEnabled && DiagnosticsKey != null && Input.GetKeyDown(DiagnosticsKey.Value))
             {
-                foreach (var manager in activeManagers)
+                foreach (var manager in activeManagerScratch)
                     VrmDiagnostics.LogAvatar(manager.gameObject, manager.BoundGiantess, "manual");
             }
 
@@ -260,14 +266,14 @@ namespace AvatarReplacer
 
                 if (preset.HasValue)
                 {
-                    foreach (var manager in activeManagers)
+                    foreach (var manager in activeManagerScratch)
                         manager.SetDebugOverride(preset.Value);
                     ModLog.Info($"Debug Expression: {preset.Value} (all active GTS avatars)");
                 }
             }
             else
             {
-                foreach (var manager in activeManagers)
+                foreach (var manager in activeManagerScratch)
                     manager.ClearDebugOverride();
             }
         }

@@ -446,13 +446,11 @@ namespace AvatarReplacer
             customFrameTargets.Clear();
             foreach (var key in activeCustomKeys) customFrameTargets[key] = 0f;
 
-            float GetWeight(string key) => GetGameExpressionWeight(key);
-
             float maxLipSyncWeight = 0f;
 
             foreach (var kvp in mouthExpressionMap)
             {
-                float w = GetWeight(kvp.Key);
+                float w = GetGameExpressionWeight(kvp.Key);
                 if (w > 0.01f)
                 {
                     string k = normalizedMouthKeys.TryGetValue(kvp.Key, out var nk) ? nk : Normalize(kvp.Key);
@@ -464,7 +462,7 @@ namespace AvatarReplacer
             }
             foreach (var kvp in mouthCustomMap)
             {
-                float w = GetWeight(kvp.Key);
+                float w = GetGameExpressionWeight(kvp.Key);
                 if (w > 0.01f)
                 {
                      string normVal = normalizedCustomValues.TryGetValue(kvp.Value, out var nv) ? nv : Normalize(kvp.Value);
@@ -480,7 +478,7 @@ namespace AvatarReplacer
 
             foreach (var kvp in eyeExpressionMap)
             {
-                float w = GetWeight(kvp.Key);
+                float w = GetGameExpressionWeight(kvp.Key);
                 if (w > 0.01f)
                 {
 
@@ -490,7 +488,7 @@ namespace AvatarReplacer
             }
             foreach (var kvp in eyeCustomMap)
             {
-                float w = GetWeight(kvp.Key);
+                float w = GetGameExpressionWeight(kvp.Key);
                 if (w > 0.01f)
                 {
                     if (!customFrameTargets.ContainsKey(kvp.Value)) customFrameTargets[kvp.Value] = 0f;
@@ -500,7 +498,7 @@ namespace AvatarReplacer
 
             foreach (var kvp in mouthExpressionMap)
             {
-                float w = GetWeight(kvp.Key);
+                float w = GetGameExpressionWeight(kvp.Key);
                 if (w <= 0.01f) continue;
 
                 BlendShapePreset preset = kvp.Value;
@@ -523,7 +521,7 @@ namespace AvatarReplacer
 
             foreach (var kvp in mouthCustomMap)
             {
-                float w = GetWeight(kvp.Key);
+                float w = GetGameExpressionWeight(kvp.Key);
                 if (w <= 0.01f) continue;
 
                 string v = normalizedCustomValues.TryGetValue(kvp.Value, out var nv) ? nv : Normalize(kvp.Value);

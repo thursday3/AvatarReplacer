@@ -381,21 +381,51 @@ namespace AvatarReplacer
 
         private BlendShapePreset? debugOverridePreset = null;
         private string debugOverrideKey = null;
+        private string debugGameExpressionOverride = null;
+
+        public void SetDebugGameExpressionOverride(string expression)
+        {
+            debugGameExpressionOverride = GetDebugGameExpressionNames()
+                .FirstOrDefault(name => string.Equals(name, expression, StringComparison.OrdinalIgnoreCase));
+            debugOverridePreset = null;
+            debugOverrideKey = null;
+        }
+
+        public List<string> GetDebugGameExpressionNames()
+        {
+            var names = eyeExpressionMap.Keys
+                .Concat(mouthExpressionMap.Keys)
+                .Concat(eyeCustomMap.Keys)
+                .Concat(mouthCustomMap.Keys)
+                .Where(name => sourceExpressionManager != null && sourceExpressionManager.TryGetExpression(name) != null)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return names;
+        }
+
+        public void ClearDebugGameExpressionOverride()
+        {
+            debugGameExpressionOverride = null;
+        }
 
         public void SetDebugOverride(BlendShapePreset preset)
         {
+            debugGameExpressionOverride = null;
             debugOverridePreset = preset;
             debugOverrideKey = null;
         }
 
         public void SetDebugOverride(string customKey)
         {
+            debugGameExpressionOverride = null;
             debugOverrideKey = customKey;
             debugOverridePreset = null;
         }
 
         public void ClearDebugOverride()
         {
+            debugGameExpressionOverride = null;
             debugOverridePreset = null;
             debugOverrideKey = null;
         }
@@ -404,7 +434,7 @@ namespace AvatarReplacer
         {
             if (sourceExpressionManager == null || vrmAdapter == null) return;
 
-            if (debugOverridePreset != null || debugOverrideKey != null)
+            if (debugOverridePreset != null || debugOverrideKey != null || debugGameExpressionOverride != null)
             {
                 ApplyDebugOverride();
             }
@@ -438,6 +468,18 @@ namespace AvatarReplacer
             if (debugOverrideKey != null)
             {
                 customFrameTargets[debugOverrideKey] = 1.0f;
+            }
+
+            if (debugGameExpressionOverride != null)
+            {
+                if (eyeExpressionMap.TryGetValue(debugGameExpressionOverride, out var eyePreset))
+                    frameTargets[eyePreset] = 1.0f;
+                if (mouthExpressionMap.TryGetValue(debugGameExpressionOverride, out var mouthPreset))
+                    frameTargets[mouthPreset] = 1.0f;
+                if (eyeCustomMap.TryGetValue(debugGameExpressionOverride, out var eyeClip))
+                    customFrameTargets[eyeClip] = 1.0f;
+                if (mouthCustomMap.TryGetValue(debugGameExpressionOverride, out var mouthClip))
+                    customFrameTargets[mouthClip] = 1.0f;
             }
 
             foreach (var kvp in frameTargets)

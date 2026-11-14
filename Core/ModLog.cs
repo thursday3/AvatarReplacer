@@ -48,6 +48,17 @@ namespace AvatarReplacer
                 UnityEngine.Debug.Log(full);
         }
 
+        public static void Diagnostic(string message)
+        {
+            if (!AvatarReplacerPlugin.DiagnosticsValue)
+                return;
+            string full = "[Diagnostics] " + message;
+            if (_log != null)
+                _log.LogInfo(full);
+            else
+                UnityEngine.Debug.Log(full);
+        }
+
         public static void ErrorException(Exception ex)
         {
             if (_log != null)

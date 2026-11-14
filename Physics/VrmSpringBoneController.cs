@@ -53,7 +53,7 @@ namespace AvatarReplacer
             DiscoverVrm10Runtime();
             ConfigureScalingSupport();
 
-            ModLog.Info($"SpringBone controller initialized: VRM0={vrm0SpringBones.Length}, VRM1={hasVrm10}, RuntimeScaling={scalingSupportConfigured}, ParamOverrides={(stiffness > 0f || gravityPower > 0f || drag > 0f ? "on" : "off")}");
+            ModLog.Diagnostic($"SpringBone controller initialized: VRM0={vrm0SpringBones.Length}, VRM1={hasVrm10}, RuntimeScaling={scalingSupportConfigured}, ParamOverrides={(stiffness > 0f || gravityPower > 0f || drag > 0f ? "on" : "off")}");
         }
 
         public void ProcessAfterAnimationFrame()
@@ -289,7 +289,7 @@ namespace AvatarReplacer
                 }
             }
 
-            ModLog.Debug($"SpringBone: runtime scale change rebased (success={reconstructed}, scale={giantess.scale:F3})");
+            ModLog.Diagnostic($"SpringBone: runtime scale change rebased (success={reconstructed}, scale={giantess.scale:F3})");
         }
 
         private void ProcessVrm10IfManual()
@@ -309,7 +309,7 @@ namespace AvatarReplacer
         {
             float lossy = transform.lossyScale.x;
             string runtimeType = vrm10SpringRuntime != null ? vrm10SpringRuntime.GetType().Name : "none";
-            ModLog.Debug(
+            ModLog.Diagnostic(
                 $"SpringBone diagnostics: GTSScale={scale:F3}, AvatarLossyScale={lossy:F3}, " +
                 $"DeltaRatio={(changed ? ratio : 1f):F3}, LargeChange={largeChange}, " +
                 $"VRM0={vrm0SpringBones.Length}, VRM1={hasVrm10}, Runtime={runtimeType}, " +

@@ -52,7 +52,7 @@ The main settings file is `BepInEx/config/com.user.avatarreplacer.cfg`.
 
 | Section | What it controls |
 |---|---|
-| `[General]` | EnableReplacement and DebugMode |
+| `[General]` | EnableReplacement, DebugMode, and Diagnostics |
 | `[Controls]` | Previous/next avatar, rescan, and diagnostics keys |
 | `[AvatarOverrides]` | VRM filename for each detected Giantess; blank keeps the game model |
 | `[Transform]` | Shared VRM position and rotation offsets, plus optional Giantess startup scale multiplier |
@@ -60,7 +60,7 @@ The main settings file is `BepInEx/config/com.user.avatarreplacer.cfg`.
 | `[SmallScaleLocomotionFix]` | Stride and hip-motion compensation for smaller characters |
 | `[ShaderTesting]` | Optional runtime shader override and shader diagnostics |
 
-DebugMode is off by default and must be enabled to use avatar switching, rescan, diagnostics, or expression-test hotkeys. A non-empty avatar assignment replaces that character's original model automatically; a blank assignment keeps the original model. There is no separate hide-original-mesh option. Automatic spring generation is also off by default; enable it only when an avatar lacks usable spring bones, because guessed chains can affect unintended bones. Shader overrides only work for shaders already loaded by the game or supplied by a compatible AssetBundle.
+DebugMode is off by default and must be enabled to use avatar switching, rescan, F10 avatar reports, or expression-test hotkeys. `Diagnostics` is a separate `[General]` setting, off by default; enable it to log spring-bone scaling and look-at tracking details without enabling DebugMode. A non-empty avatar assignment replaces that character's original model automatically; a blank assignment keeps the original model. There is no separate hide-original-mesh option. Automatic spring generation is also off by default; enable it only when an avatar lacks usable spring bones, because guessed chains can affect unintended bones. Shader overrides only work for shaders already loaded by the game or supplied by a compatible AssetBundle.
 
 ## Per-avatar profiles
 

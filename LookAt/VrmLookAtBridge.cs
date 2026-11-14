@@ -105,12 +105,12 @@ namespace AvatarReplacer
             else
             {
 
-                 ModLog.Info("[WARN] VrmLookAtBridge: AttentionEyeTransform not found during init. Using default forward.");
+                 ModLog.Diagnostic("VrmLookAtBridge: AttentionEyeTransform not found during init. Using default forward.");
                  if (headAdapter != null && headAdapter.Head != null)
                      currentLookTarget = headAdapter.Head.position + headAdapter.Head.forward;
             }
 
-            ModLog.Debug("VrmLookAtBridge: Initialized in PERMANENT MANUAL MODE for lifelike tracking via Adapter.");
+            ModLog.Diagnostic("VrmLookAtBridge: Initialized in PERMANENT MANUAL MODE for lifelike tracking via Adapter.");
         }
 
         private void DiscoverEyeBlendShapes()
@@ -129,7 +129,7 @@ namespace AvatarReplacer
 
             int foundCount = (HasLookLeft() ? 1 : 0) + (HasLookRight() ? 1 : 0) +
                            (HasLookUp() ? 1 : 0) + (HasLookDown() ? 1 : 0);
-            ModLog.Debug($"VrmLookAtBridge: Discovered {foundCount}/4 eye blend shapes");
+            ModLog.Diagnostic($"VrmLookAtBridge: Discovered {foundCount}/4 eye blend shapes");
         }
 
         private void DiscoverEyeBoneFallback()
@@ -143,7 +143,7 @@ namespace AvatarReplacer
             {
                 leftEyeRest = leftEyeBone.localRotation;
                 rightEyeRest = rightEyeBone.localRotation;
-                ModLog.Debug("VrmLookAtBridge: Using direct eye bone fallback (no look blendshapes)");
+                ModLog.Diagnostic("VrmLookAtBridge: Using direct eye bone fallback (no look blendshapes)");
             }
         }
 
@@ -195,9 +195,9 @@ namespace AvatarReplacer
 
             ApplyManualEyeMovement();
 
-            if (AvatarReplacerPlugin.IsDebugEnabled && Time.frameCount % 300 == 0)
+            if (AvatarReplacerPlugin.DiagnosticsValue && Time.frameCount % 300 == 0)
             {
-                ModLog.Debug($"VrmLookAtBridge: Mode LIFELIKE MANUAL, Yaw={smoothYaw:F2}, Pitch={smoothPitch:F2}, Glancing={isGlancingAway}");
+                ModLog.Diagnostic($"VrmLookAtBridge: Mode LIFELIKE MANUAL, Yaw={smoothYaw:F2}, Pitch={smoothPitch:F2}, Glancing={isGlancingAway}");
             }
         }
 
@@ -325,7 +325,7 @@ namespace AvatarReplacer
             TryApplyVrm10LookAt(smoothYaw, smoothPitch);
             TryApplyVrm0LookAt(smoothYaw, smoothPitch);
 
-            bool shouldLog = AvatarReplacerPlugin.IsDebugEnabled && (Time.frameCount % 300 == 0);
+            bool shouldLog = AvatarReplacerPlugin.DiagnosticsValue && (Time.frameCount % 300 == 0);
 
             if (smoothYaw > 0)
             {
@@ -333,7 +333,7 @@ namespace AvatarReplacer
                 if (HasLookRight())
                 {
                     SetWeight(lookRightKey, lookRightString, weight);
-                    if (shouldLog) ModLog.Debug($"VrmLookAtBridge: MANUAL LookRight={weight:F3} (Yaw={smoothYaw:F1})");
+                    if (shouldLog) ModLog.Diagnostic($"VrmLookAtBridge: MANUAL LookRight={weight:F3} (Yaw={smoothYaw:F1})");
                 }
                 if (HasLookLeft()) SetWeight(lookLeftKey, lookLeftString, 0f);
             }
@@ -343,7 +343,7 @@ namespace AvatarReplacer
                 if (HasLookLeft())
                 {
                     SetWeight(lookLeftKey, lookLeftString, weight);
-                    if (shouldLog) ModLog.Debug($"VrmLookAtBridge: MANUAL LookLeft={weight:F3} (Yaw={smoothYaw:F1})");
+                    if (shouldLog) ModLog.Diagnostic($"VrmLookAtBridge: MANUAL LookLeft={weight:F3} (Yaw={smoothYaw:F1})");
                 }
                 if (HasLookRight()) SetWeight(lookRightKey, lookRightString, 0f);
             }
@@ -362,7 +362,7 @@ namespace AvatarReplacer
                 if (HasLookUp())
                 {
                     SetWeight(lookUpKey, lookUpString, weight);
-                    if (shouldLog) ModLog.Debug($"VrmLookAtBridge: MANUAL LookUp={weight:F3} (Pitch={smoothPitch:F1})");
+                    if (shouldLog) ModLog.Diagnostic($"VrmLookAtBridge: MANUAL LookUp={weight:F3} (Pitch={smoothPitch:F1})");
                 }
                 if (HasLookDown()) SetWeight(lookDownKey, lookDownString, 0f);
             }
@@ -372,7 +372,7 @@ namespace AvatarReplacer
                 if (HasLookDown())
                 {
                     SetWeight(lookDownKey, lookDownString, weight);
-                    if (shouldLog) ModLog.Debug($"VrmLookAtBridge: MANUAL LookDown={weight:F3} (Pitch={smoothPitch:F1})");
+                    if (shouldLog) ModLog.Diagnostic($"VrmLookAtBridge: MANUAL LookDown={weight:F3} (Pitch={smoothPitch:F1})");
                 }
                 if (HasLookUp()) SetWeight(lookUpKey, lookUpString, 0f);
             }

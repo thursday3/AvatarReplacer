@@ -39,6 +39,7 @@ namespace AvatarReplacer
         private static ConfigEntry<float> RotX, RotY, RotZ;
         private static ConfigEntry<float> ScaleOverride;
         private static ConfigEntry<bool> DebugMode;
+        private static ConfigEntry<bool> Diagnostics;
         private static ConfigEntry<float> SpringBoneStiffness;
         private static ConfigEntry<float> SpringBoneGravityPower;
         private static ConfigEntry<float> SpringBoneDrag;
@@ -88,7 +89,8 @@ namespace AvatarReplacer
         public static float SmallScaleLocomotionFixThresholdMetersValue => SmallScaleLocomotionFixThresholdMeters != null ? Mathf.Max(0.1f, SmallScaleLocomotionFixThresholdMeters.Value) : 60f;
         public static float SmallScaleLocomotionFixStrideFactorMinValue => SmallScaleLocomotionFixStrideFactorMin != null ? Mathf.Clamp(SmallScaleLocomotionFixStrideFactorMin.Value, 0.1f, 1f) : 0.75f;
         public static float SmallScaleLocomotionFixHipSmoothMultiplierValue => SmallScaleLocomotionFixHipSmoothMultiplier != null ? Mathf.Max(1f, SmallScaleLocomotionFixHipSmoothMultiplier.Value) : 1.25f;
-        public static bool SpringBoneDiagnosticsValue => DebugMode != null && DebugMode.Value;
+        public static bool DiagnosticsValue => Diagnostics != null && Diagnostics.Value;
+        public static bool SpringBoneDiagnosticsValue => DiagnosticsValue;
         public static float SpringBoneDiagnosticsIntervalValue => 2.0f;
 
         private static VrmManager activeVrmManager;
@@ -161,7 +163,9 @@ namespace AvatarReplacer
 
             EnableReplacement = Config.Bind("General", "EnableReplacement", true, "Set to FALSE to disable VRM.");
             DebugMode = Config.Bind("General", "DebugMode", false,
-                "Enable verbose debug logging and debug hotkeys (avatar switching, rescan, diagnostics, and Right Alt + mouse wheel expression cycling).");
+                "Enable verbose debug logging and debug hotkeys (avatar switching, rescan, F10 avatar reports, and Right Alt + mouse wheel expression cycling).");
+            Diagnostics = Config.Bind("General", "Diagnostics", false,
+                "Enable diagnostic logging from VRM spring-bone scaling and look-at tracking. Can be changed independently of DebugMode.");
 
             // Bind all supported lobby assignments immediately so a fresh config
             // contains every character, even if the current scene only spawned Akipo.

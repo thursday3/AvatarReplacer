@@ -202,9 +202,11 @@ namespace AvatarReplacer
             }
         }
 
-        public void SetDebugOverride(BlendShapePreset preset) => cachedExpressionBridge?.SetDebugOverride(preset);
+        public void SetDebugGameExpressionOverride(string expression) => cachedExpressionBridge?.SetDebugGameExpressionOverride(expression);
 
-        public void ClearDebugOverride() => cachedExpressionBridge?.ClearDebugOverride();
+        public List<string> GetDebugGameExpressionNames() => cachedExpressionBridge?.GetDebugGameExpressionNames() ?? new List<string>();
+
+        public void ClearDebugGameExpressionOverride() => cachedExpressionBridge?.ClearDebugGameExpressionOverride();
 
         private VrmExpressionBridge cachedExpressionBridge;
 

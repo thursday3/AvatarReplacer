@@ -5,8 +5,10 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using VRM;
 
 namespace AvatarReplacer
@@ -14,6 +16,8 @@ namespace AvatarReplacer
     [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
     public class AvatarReplacerPlugin : BaseUnityPlugin
     {
+        private Harmony harmonyInstance;
+
         static AvatarReplacerPlugin()
         {
             // Register before Harmony and UniVRM types are first used. The
@@ -27,7 +31,7 @@ namespace AvatarReplacer
             public const string PLUGIN_NAME = "AvatarReplacer";
             // BepInEx 5 parses the plugin version as System.Version; prerelease
             // suffixes such as "-beta" make the plugin undiscoverable.
-            public const string PLUGIN_VERSION = "6.2.0";
+            public const string PLUGIN_VERSION = "6.4.4";
         }
 
         private static ConfigEntry<bool> EnableReplacement;
@@ -118,6 +122,12 @@ namespace AvatarReplacer
         private static List<string> availableVrmFiles = new List<string>();
         private static int currentVrmIndex = -1;
         private static readonly List<Giantess> giantessTargets = new List<Giantess>();
+        private static bool debugWheelWasActive;
+        private static bool debugWheelNoScrollWarningLogged;
+        private static bool debugInputCallbackLogged;
+        private static float debugWheelHeldTime;
+        private static int debugExpressionScrollIndex = -1;
+        private static int lastDebugInputFrame = -1;
 
         private static Dictionary<string, VrmManager> loadedVrmCache = new Dictionary<string, VrmManager>();
         private static List<string> cacheAccessOrder = new List<string>();
@@ -145,11 +155,19 @@ namespace AvatarReplacer
         private void Awake()
         {
             Instance = this;
+            SceneManager.sceneUnloaded -= OnSceneUnloaded;
+            SceneManager.sceneUnloaded += OnSceneUnloaded;
             ModLog.SetLogger(Logger);
 
             EnableReplacement = Config.Bind("General", "EnableReplacement", true, "Set to FALSE to disable VRM.");
             DebugMode = Config.Bind("General", "DebugMode", false,
-                "Enable verbose debug logging and debug hotkeys (avatar switching, rescan, diagnostics, and Ctrl+1..0 expressions).");
+                "Enable verbose debug logging and debug hotkeys (avatar switching, rescan, diagnostics, and Right Alt + mouse wheel expression cycling).");
+
+            // Bind all supported lobby assignments immediately so a fresh config
+            // contains every character, even if the current scene only spawned Akipo.
+            BindAvatarOverride("Akipo");
+            BindAvatarOverride("RedTwin");
+            BindAvatarOverride("BlueTwin");
 
             PreviousAvatarKey = Config.Bind("Controls", "PreviousAvatarKey", KeyCode.PageUp, "Key to switch to previous avatar");
             NextAvatarKey = Config.Bind("Controls", "NextAvatarKey", KeyCode.PageDown, "Key to switch to next avatar");
@@ -185,8 +203,12 @@ namespace AvatarReplacer
             SmallScaleLocomotionFixStrideFactorMin = Config.Bind("SmallScaleLocomotionFix", "StrideFactorMin", 0.75f, "Minimum stride armature factor at strongest small-scale compensation.");
             SmallScaleLocomotionFixHipSmoothMultiplier = Config.Bind("SmallScaleLocomotionFix", "HipSmoothMultiplier", 1.25f, "Additional smoothing multiplier for small-scale root/hip motion.");
 
-            Harmony.CreateAndPatchAll(typeof(AvatarReplacerPlugin));
+            harmonyInstance = new Harmony(PluginInfo.PLUGIN_GUID);
+            harmonyInstance.PatchAll(typeof(AvatarReplacerPlugin));
             Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} v{PluginInfo.PLUGIN_VERSION} loaded!");
+            Logger.LogInfo($"Debug input initialized. DebugMode={DebugMode.Value}; expression cycling uses Right Alt + mouse wheel.");
+            LogInputPatchStatus("PlayerDriver.Update", AccessTools.Method(typeof(PlayerDriver), "Update"));
+            LogInputPatchStatus("KiriInputManager.Update", AccessTools.Method(typeof(KiriInputManager), "Update"));
 
             configDir = Path.Combine(Paths.PluginPath, "AvatarReplacer", "config");
             if (!Directory.Exists(configDir))
@@ -215,17 +237,53 @@ namespace AvatarReplacer
                 }
             }
 
+            ProcessDebugInputSafely();
+        }
+
+        private static void LogInputPatchStatus(string methodName, MethodBase method)
+        {
+            if (method == null)
+            {
+                ModLog.Warning($"Debug input Harmony patch target missing: {methodName}.");
+                return;
+            }
+
+            var patchInfo = Harmony.GetPatchInfo(method);
+            bool patched = patchInfo != null && patchInfo.Owners.Contains(PluginInfo.PLUGIN_GUID);
+            if (patched)
+                ModLog.Info($"Debug input Harmony patch active: {methodName}.");
+            else
+                ModLog.Warning($"Debug input Harmony patch not registered: {methodName}.");
+        }
+
+        private static void ProcessDebugInputSafely()
+        {
+            if (lastDebugInputFrame == Time.frameCount) return;
+            lastDebugInputFrame = Time.frameCount;
+
+            try { ProcessDebugInput(); }
+            catch (Exception e) { ModLog.Error($"Debug input processing failed: {e}"); }
+        }
+
+        private static void ProcessDebugInput()
+        {
             bool debugEnabled = IsDebugEnabled;
+            if (debugEnabled && !debugInputCallbackLogged)
+            {
+                debugInputCallbackLogged = true;
+                ModLog.Info("Debug input callback is active.");
+            }
+
             if (debugEnabled)
             {
                 if (PreviousAvatarKey != null &&
-                    (Input.GetKeyDown(PreviousAvatarKey.Value) || Input.GetKeyDown(KeyCode.PageUp)))
+                    (DebugKeyInput.WasPressed(PreviousAvatarKey.Value) || DebugKeyInput.WasPressed(KeyCode.PageUp)))
                     SwitchAvatar(-1);
                 else if (NextAvatarKey != null &&
-                         (Input.GetKeyDown(NextAvatarKey.Value) || Input.GetKeyDown(KeyCode.PageDown)))
+                         (DebugKeyInput.WasPressed(NextAvatarKey.Value) || DebugKeyInput.WasPressed(KeyCode.PageDown)))
                     SwitchAvatar(1);
 
-                if (RescanKey != null && Input.GetKeyDown(RescanKey.Value))
+                if (RescanKey != null && DebugKeyInput.WasPressed(RescanKey.Value))
                 {
                     ModLog.Info($"Manual Rescan ({RescanKey.Value}) Detected");
                     ScanForVrms();
@@ -242,40 +300,89 @@ namespace AvatarReplacer
                     activeManagerScratch.Add(manager);
             }
 
-            if (debugEnabled && DiagnosticsKey != null && Input.GetKeyDown(DiagnosticsKey.Value))
+            if (debugEnabled && DiagnosticsKey != null && DebugKeyInput.WasPressed(DiagnosticsKey.Value))
             {
+                ModLog.Info($"Manual Diagnostics ({DiagnosticsKey.Value}) Detected");
+                if (activeManagerScratch.Count == 0)
+                    ModLog.Info("Manual Diagnostics: no active VRM avatars to report.");
                 foreach (var manager in activeManagerScratch)
                     VrmDiagnostics.LogAvatar(manager.gameObject, manager.BoundGiantess, "manual");
             }
 
-            bool control = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl);
-            bool useDebugExpressions = debugEnabled && control;
-            if (useDebugExpressions)
+            bool rightAltDown = DebugKeyInput.GetKey(KeyCode.RightAlt) || DebugKeyInput.GetKey(KeyCode.AltGr);
+            bool debugWheelActive = debugEnabled && rightAltDown;
+            if (debugWheelActive)
             {
-                BlendShapePreset? preset = null;
-                if (Input.GetKeyDown(KeyCode.Alpha1)) preset = BlendShapePreset.Neutral;
-                else if (Input.GetKeyDown(KeyCode.Alpha2)) preset = BlendShapePreset.Joy;
-                else if (Input.GetKeyDown(KeyCode.Alpha3)) preset = BlendShapePreset.Angry;
-                else if (Input.GetKeyDown(KeyCode.Alpha4)) preset = BlendShapePreset.Sorrow;
-                else if (Input.GetKeyDown(KeyCode.Alpha5)) preset = BlendShapePreset.Fun;
-                else if (Input.GetKeyDown(KeyCode.Alpha6)) preset = BlendShapePreset.Blink;
-                else if (Input.GetKeyDown(KeyCode.Alpha7)) preset = BlendShapePreset.LookLeft;
-                else if (Input.GetKeyDown(KeyCode.Alpha8)) preset = BlendShapePreset.LookRight;
-                else if (Input.GetKeyDown(KeyCode.Alpha9)) preset = BlendShapePreset.A;
-                else if (Input.GetKeyDown(KeyCode.Alpha0)) preset = BlendShapePreset.O;
+                if (!debugWheelWasActive)
+                    ModLog.Info("Debug expression wheel active: Right Alt detected. Scroll the mouse wheel to select an expression.");
 
-                if (preset.HasValue)
+                float wheel = DebugKeyInput.GetMouseWheelDelta();
+
+                if (Mathf.Abs(wheel) > 0.01f)
                 {
-                    foreach (var manager in activeManagerScratch)
-                        manager.SetDebugOverride(preset.Value);
-                    ModLog.Info($"Debug Expression: {preset.Value} (all active GTS avatars)");
+                    debugWheelHeldTime = 0f;
+                    debugWheelNoScrollWarningLogged = false;
+                    List<string> expressions = activeManagerScratch.Count > 0
+                        ? activeManagerScratch[0].GetDebugGameExpressionNames()
+                        : new List<string>();
+
+                    if (expressions.Count == 0)
+                    {
+                        ModLog.Info("Debug expression wheel: no active VRM expressions are available.");
+                    }
+                    else
+                    {
+                        int direction = wheel > 0f ? -1 : 1;
+                        if (debugExpressionScrollIndex < 0)
+                            debugExpressionScrollIndex = direction < 0 ? expressions.Count - 1 : 0;
+                        else
+                            debugExpressionScrollIndex = (debugExpressionScrollIndex + direction + expressions.Count) % expressions.Count;
+
+                        string expression = expressions[debugExpressionScrollIndex];
+                        foreach (var manager in activeManagerScratch)
+                            manager.SetDebugGameExpressionOverride(expression);
+
+                        ModLog.Info($"Debug expression {debugExpressionScrollIndex + 1}/{expressions.Count}: {expression} (Right Alt + mouse wheel)");
+                    }
+                }
+                else
+                {
+                    debugWheelHeldTime += Time.unscaledDeltaTime;
+                    if (debugWheelHeldTime >= 2f && !debugWheelNoScrollWarningLogged)
+                    {
+                        debugWheelNoScrollWarningLogged = true;
+                        ModLog.Info("Debug expression wheel: Right Alt is detected, but no mouse-wheel delta reached Unity.");
+                    }
                 }
             }
             else
             {
-                foreach (var manager in activeManagerScratch)
-                    manager.ClearDebugOverride();
+                if (debugWheelWasActive)
+                {
+                    foreach (var manager in activeManagerScratch)
+                        manager.ClearDebugGameExpressionOverride();
+                    debugExpressionScrollIndex = -1;
+                    ModLog.Info("Debug expression override cleared; normal game expressions restored.");
+                }
+                debugWheelHeldTime = 0f;
+                debugWheelNoScrollWarningLogged = false;
             }
+
+            debugWheelWasActive = debugWheelActive;
+        }
+
+        [HarmonyPatch(typeof(PlayerDriver), "Update")]
+        [HarmonyPostfix]
+        private static void PlayerDriver_Update_DebugInputPostfix()
+        {
+            ProcessDebugInputSafely();
+        }
+
+        [HarmonyPatch(typeof(KiriInputManager), "Update")]
+        [HarmonyPostfix]
+        private static void KiriInputManager_Update_DebugInputPostfix()
+        {
+            ProcessDebugInputSafely();
         }
 
         public static void ScanForVrms()
@@ -397,6 +504,15 @@ namespace AvatarReplacer
             activeVrmPath = null;
         }
 
+        private static void OnSceneUnloaded(Scene scene)
+        {
+            // Do not rely on Giantess.Awake to notice a transition: that method
+            // can fail in the game's outfit setup before our postfix runs, and
+            // reloading the same scene name would bypass its name comparison.
+            ClearCache($"Scene unloaded '{scene.name}'");
+            lastSceneName = null;
+        }
+
         public static void ReloadCurrentAvatar()
         {
             var targets = GetLiveGiantessTargets();
@@ -436,14 +552,22 @@ namespace AvatarReplacer
             {
                 var setting = GetVrmFileSetting(target);
                 string currentFile = setting.Value?.Trim();
-                if (string.IsNullOrEmpty(currentFile)) continue;
-
-                int currentIndex = availableVrmFiles.FindIndex(file =>
-                    string.Equals(Path.GetFileName(file), currentFile, StringComparison.OrdinalIgnoreCase));
+                int currentIndex = string.IsNullOrEmpty(currentFile)
+                    ? -1
+                    : availableVrmFiles.FindIndex(file =>
+                        string.Equals(Path.GetFileName(file), currentFile, StringComparison.OrdinalIgnoreCase));
                 if (currentIndex < 0)
                 {
-                    ModLog.Warning($"Cannot switch {target.name}: configured VRM '{currentFile}' was not found.");
-                    continue;
+                    if (!string.IsNullOrEmpty(currentFile))
+                    {
+                        ModLog.Warning($"Cannot switch {target.name}: configured VRM '{currentFile}' was not found.");
+                        continue;
+                    }
+
+                    // An empty assignment keeps the original model until the
+                    // user explicitly presses a debug switch key. From there,
+                    // Page Down starts at the first VRM and Page Up at the last.
+                    currentIndex = direction < 0 ? 0 : -1;
                 }
 
                 int nextIndex = (currentIndex + (direction < 0 ? -1 : 1) + availableVrmFiles.Count) % availableVrmFiles.Count;
@@ -509,6 +633,31 @@ namespace AvatarReplacer
             }
         }
 
+        [HarmonyPatch(typeof(Giantess), "SetupOutfit")]
+        [HarmonyFinalizer]
+        private static Exception Giantess_SetupOutfit_Finalizer(Giantess __instance, Exception __exception)
+        {
+            try
+            {
+                if (__instance != null)
+                {
+                    int targetId = GetTargetId(__instance);
+                    if (activeManagersByGiantess.TryGetValue(targetId, out var manager) &&
+                        manager != null && manager.gameObject != null && manager.gameObject.activeInHierarchy)
+                    {
+                        // Run even when the game's outfit refresh throws: it may
+                        // already have re-enabled original renderers by then.
+                        manager.EnsureOriginalAvatarHidden();
+                    }
+                }
+            }
+            catch (Exception cleanupError)
+            {
+                ModLog.Warning($"Failed to re-hide original outfit after SetupOutfit: {cleanupError.Message}");
+            }
+            return __exception;
+        }
+
         private static System.Collections.IEnumerator InitializeVrmDelayed(Giantess giantess, string vrmPath)
         {
 
@@ -526,17 +675,17 @@ namespace AvatarReplacer
 
         private static ConfigEntry<string> GetVrmFileSetting(Giantess giantess)
         {
-            string name = GetGiantessConfigName(giantess);
-            string settingName = name;
-            if (!giantessVrmFileSettings.TryGetValue(settingName, out var setting))
-            {
-                setting = Instance.Config.Bind(
-                    "AvatarOverrides",
-                    settingName,
-                    string.Empty,
-                    $"VRM filename for {giantess.name}. Leave empty to keep this Giantess's original game model.");
-                giantessVrmFileSettings[settingName] = setting;
-            }
+            return BindAvatarOverride(GetGiantessConfigName(giantess));
+        }
+
+        private static ConfigEntry<string> BindAvatarOverride(string settingName)
+        {
+            if (giantessVrmFileSettings.TryGetValue(settingName, out var setting))
+                return setting;
+
+            const string description = "Put the VRM filename here. The .vrm file must be in BepInEx/plugins/AvatarReplacer/vrm/. Leave blank to keep the original in-game avatar.";
+            setting = Instance.Config.Bind("AvatarOverrides", settingName, string.Empty, description);
+            giantessVrmFileSettings[settingName] = setting;
             return setting;
         }
 
@@ -996,6 +1145,10 @@ namespace AvatarReplacer
         private static void SafeDestroyAvatar(GameObject avatarRoot)
         {
             if (avatarRoot == null) return;
+
+            // Unity defers Destroy until the end of the frame; deactivate now so
+            // an old animation bridge cannot render a one-frame ghost on reload.
+            avatarRoot.SetActive(false);
 
             var proxy = avatarRoot.GetComponent<VRM.VRMBlendShapeProxy>();
             if (proxy != null)

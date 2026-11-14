@@ -134,6 +134,27 @@ namespace AvatarReplacer
                 bool isEye = gameKey.ToLower().Contains("eyes") || gameKey.ToLower().Contains("look");
                 bool isMouth = gameKey.ToLower().Contains("mouth");
 
+
+                // fallback for models without a suitable custom eye clip.
+                if (isEye && string.Equals(gameKey, "smug eyes", StringComparison.OrdinalIgnoreCase))
+                {
+                    var smugEyeClip = vrmNames
+                        .Where(name => !IsStandardPresetName(name))
+                        .Where(name => normalize(name).Contains("eye") &&
+                            (normalize(name).Contains("jito") || normalize(name).Contains("smug")))
+                        .OrderByDescending(name => normalize(name).Contains("jito"))
+                        .ThenBy(name => name.Length)
+                        .FirstOrDefault();
+
+                    if (!string.IsNullOrEmpty(smugEyeClip))
+                    {
+                        eyeExpressionMap.Remove(gameKey);
+                        eyeCustomMap[gameKey] = smugEyeClip;
+                        ModLog.Info($"VrmExpressionBridge: Using eye-specific smug clip '{smugEyeClip}' for '{gameKey}'.");
+                        continue;
+                    }
+                }
+
                 if (isEye && (eyeExpressionMap.ContainsKey(gameKey) || eyeCustomMap.ContainsKey(gameKey))) continue;
                 if (isMouth && (mouthExpressionMap.ContainsKey(gameKey) || mouthCustomMap.ContainsKey(gameKey))) continue;
 

@@ -4,10 +4,10 @@ AvatarReplacer replaces selected Lethal Fantasy Giantess models with VRM avatars
 
 ## Compatibility
 
-- Target: **Lethal Fantasy public-beta v1.0.1**.
+- Target: **Lethal Fantasy beta v1.0.2**.
 - Runtime: Unity and BepInEx. Install a BepInEx version compatible with your game installation before installing the mod.
 - Avatar format: VRM 0.x or VRM 1.0. A valid humanoid rig is needed for full animation retargeting.
-- The plugin was compiled against the public-beta v1.0.1 game assembly. Runtime verification on that game version is pending.
+- The plugin was compiled against the beta v1.0.2 game assembly. Runtime verification on that game version is pending.
 
 ## Install
 
@@ -42,9 +42,9 @@ The controls below are disabled by default. Set `DebugMode = true` under `[Gener
 | Page Down | Switch each assigned character to its next VRM; requires DebugMode |
 | F5 | Rescan the VRM folder and reload configured assignments; requires DebugMode |
 | F10 | Write avatar diagnostics to the BepInEx log; requires DebugMode |
-| Ctrl+1 through Ctrl+0 | Temporarily apply a debug expression to active replacement avatars; requires DebugMode |
+| Hold Right Alt + mouse wheel | Cycle through the active character's mapped game expressions; requires DebugMode |
 
-DebugMode defaults to `false`, so these shortcuts do nothing until the user enables it. The configurable bindings are in the `[Controls]` section. Page Up and Page Down are also recognized as built-in switching keys. Debug expressions map to Neutral, Joy, Angry, Sorrow, Fun, Blink, LookLeft, LookRight, A, and O in number order from 1 to 0. Release Ctrl to clear the temporary override.
+DebugMode defaults to `false`, so these shortcuts do nothing until the user enables it. The configurable bindings are in the `[Controls]` section. Page Up and Page Down are also recognized as built-in switching keys. If a character's assignment is blank, Page Down selects the first VRM and Page Up selects the last; until a switch key is pressed, the original model stays visible. While Right Alt is held, the wheel cycles the active character's selectable game expressions that have a mapped VRM target. Releasing Right Alt clears the temporary expression and restores normal game expression syncing. Hotkeys support Unity input and raw keyboard polling for Wine setups.
 
 ## Settings
 
@@ -100,7 +100,7 @@ The mod checks the per-avatar map first. If it has no non-empty overrides, the s
 
 `gameExpression` must match the game's expression name. `vrmBlendShape` must match a clip exposed by the VRM. If `vrmBlendShape` is empty, that row is ignored as an override; the mod's existing built-in preset mapping or automatic mapping remains in effect. It does not disable that game expression. `Blink` is handled through the blink controller.
 
-Generated map templates also include `defaultVrm` as reference information showing the built-in preset. The runtime does not use that field as an override; when editing, the two fields above define the custom mapping.
+Generated templates use the same two fields. Empty `vrmBlendShape` values mean “keep the built-in or automatic mapping.” When a target VRM provides a clearly named eye- or mouth-specific clip, the translator prefers that clip for the matching game expression; otherwise it falls back to its built-in preset or automatic match.
 
 Example empty row (no custom override):
 
@@ -119,6 +119,7 @@ Map files accept `//` comments and trailing commas. The mod preserves existing p
 
 - **No avatar appears:** confirm the assignment matches a `.vrm` filename in the `vrm/` folder, enable DebugMode, then press F5. A blank assignment intentionally leaves the original model visible.
 - **The mod does not load:** confirm BepInEx started and check `BepInEx/LogOutput.log` for plugin loading errors.
+- **Right Alt + mouse wheel does nothing:** confirm `DebugMode = true`, then check the log for the `Debug input Harmony patch active` entries and `Debug input callback is active`. These confirm the game hooks and input callback are running.
 - **Animation looks wrong:** check that the VRM has a valid humanoid rig. Use F10 diagnostics with DebugMode enabled for details.
 - **Expressions do not match:** inspect the generated expression map and confirm the VRM clip names. Enable DebugMode and reload with F5 after editing.
 - **Shader appears pink or missing:** the required shader may not be loaded. Review `[ShaderTesting]` and shader diagnostics in the BepInEx log.

@@ -8,8 +8,7 @@ namespace AvatarReplacer
     /// One row of the expression map — a fully visible mapping line:
     ///
     ///   gameExpression : the giantess expression (game side)
-    ///   defaultVrm     : what the mod uses when you don't override (reference)
-    ///   vrmBlendShape  : what is actually driven; empty = use defaultVrm
+    ///   vrmBlendShape  : a custom override; empty = keep built-in/automatic mapping
     ///
     /// To override a row, put a blendshape name in vrmBlendShape. Empty rows
     /// and never-listed expressions alike are shown so the player can see —
@@ -19,7 +18,6 @@ namespace AvatarReplacer
     public class CustomExpressionEntry
     {
         public string gameExpression = "";
-        public string defaultVrm = "";
         public string vrmBlendShape = "";
     }
 
@@ -30,8 +28,7 @@ namespace AvatarReplacer
     ///   BepInEx/plugins/AvatarReplacer/config/expression_map.&lt;avatarname&gt;.json
     ///
     /// A generated file lists EVERY game expression the mod can drive —
-    /// including empty and unused ones — with its default VRM preset filled
-    /// in, so editing is simply changing the "vrmBlendShape" column.
+    /// including empty and unused ones — with blank custom override values.
     ///
     /// Templates are regenerated ONLY when the file is missing or is an empty
     /// skeleton (zero mapping rows — the older generator's broken output).
@@ -138,7 +135,6 @@ namespace AvatarReplacer
                     first = false;
                     sb.Append("        {\n");
                     sb.Append("            \"gameExpression\": ").Append(SimpleJson.Quote(m.gameExpression)).Append(",\n");
-                    sb.Append("            \"defaultVrm\": ").Append(SimpleJson.Quote(m.defaultVrm)).Append(",\n");
                     sb.Append("            \"vrmBlendShape\": ").Append(SimpleJson.Quote(m.vrmBlendShape)).Append('\n');
                     sb.Append("        }");
                 }
@@ -171,7 +167,6 @@ namespace AvatarReplacer
                     map.mappings.Add(new CustomExpressionEntry
                     {
                         gameExpression = SimpleJson.GetString(row, "gameExpression") ?? "",
-                        defaultVrm = SimpleJson.GetString(row, "defaultVrm") ?? "",
                         vrmBlendShape = SimpleJson.GetString(row, "vrmBlendShape") ?? ""
                     });
                 }
@@ -188,7 +183,7 @@ namespace AvatarReplacer
         /// with real content):
         ///  - a zero-row skeleton is regenerated as a full visible template;
         ///  - game expressions missing from the file are appended as new rows;
-        ///  - legacy rows without defaultVrm get it filled in.
+        ///  - legacy defaultVrm reference fields are removed from rows.
         /// Returns null when the feature should be OFF (no filled rows).
         /// </summary>
         public static CustomExpressionMap LoadForAvatar(string configDir, string vrmPath)
@@ -200,7 +195,7 @@ namespace AvatarReplacer
                 {
                     if (UpgradeFileInPlace(perVrm, Path.GetFileNameWithoutExtension(vrmPath)))
                     {
-                        ModLog.Info($"Expression map {Path.GetFileName(perVrm)} was auto-upgraded (visible defaults / appended rows) — check 'defaultVrm' and your overrides are intact.");
+                        ModLog.Info($"Expression map {Path.GetFileName(perVrm)} was auto-upgraded (two-field rows / appended rows); overrides are intact.");
                     }
 
                     var map = LoadFromFile(perVrm);
@@ -296,26 +291,12 @@ namespace AvatarReplacer
                 // untouched otherwise (in particular: do not rewrite the file
                 // when nothing is appended).
                 var listed = new HashSet<string>();
-                bool backfilled = false;
-                var defaultsByKey = new Dictionary<string, string>();
-                foreach (var def in ExpressionDefaults.All)
-                    defaultsByKey[def.GameExpression] = def.DefaultPreset ?? "";
+                bool hadLegacyDefaultField = File.ReadAllText(path).IndexOf("\"defaultVrm\"", StringComparison.Ordinal) >= 0;
 
                 foreach (var row in map.mappings)
                 {
                     if (row == null || string.IsNullOrWhiteSpace(row.gameExpression)) continue;
                     listed.Add(row.gameExpression.Trim());
-                    // Legacy rows (pre visible-map format) have an empty
-                    // reference column; fill it from the table so the file
-                    // shows what the mod actually does. Overrides are never
-                    // touched by this pass.
-                    if (string.IsNullOrEmpty(row.defaultVrm) &&
-                        defaultsByKey.TryGetValue(row.gameExpression.Trim(), out var def0) &&
-                        !string.IsNullOrEmpty(def0))
-                    {
-                        row.defaultVrm = def0;
-                        backfilled = true;
-                    }
                 }
 
                 bool appended = false;
@@ -326,18 +307,17 @@ namespace AvatarReplacer
                         map.mappings.Add(new CustomExpressionEntry
                         {
                             gameExpression = def.GameExpression,
-                            defaultVrm = def.DefaultPreset ?? "",
                             vrmBlendShape = ""
                         });
                         appended = true;
                     }
                 }
-                if (appended || backfilled)
+                if (appended || hadLegacyDefaultField)
                 {
                     File.WriteAllText(path, map.ToJsonString());
-                    ModLog.Info($"Expression map {Path.GetFileName(path)} upgraded: {(appended ? "appended missing rows" : "filled defaults")}; overrides kept.");
+                    ModLog.Info($"Expression map {Path.GetFileName(path)} upgraded: {(appended ? "appended missing rows" : "removed legacy reference fields")}; overrides kept.");
                 }
-                return appended || backfilled;
+                return appended || hadLegacyDefaultField;
             }
             catch (Exception e)
             {
@@ -374,8 +354,7 @@ namespace AvatarReplacer
 
         /// <summary>
         /// Writes a FULL visible template: every expression known to the mod
-        /// (including empty and unused ones), each with its default preset
-        /// shown in 'defaultVrm' so the player can see what empty means.
+        /// (including empty and unused ones), with blank custom override values.
         ///
         /// With force:false the file is created only when missing (NEVER
         /// overwrites user edits). With force:true an existing file is
@@ -399,13 +378,12 @@ namespace AvatarReplacer
                     template.mappings.Add(new CustomExpressionEntry
                     {
                         gameExpression = def.GameExpression,
-                        defaultVrm = def.DefaultPreset ?? "",
-                        vrmBlendShape = ""   // empty = use the default shown beside it
+                        vrmBlendShape = ""   // empty = keep built-in/automatic mapping
                     });
                 }
 
                 File.WriteAllText(path, template.ToJsonString());
-                ModLog.Info($"Created expression map template at: {path} (defaultVrm = what an empty vrmBlendShape uses; fill vrmBlendShape to override).");
+                ModLog.Info($"Created expression map template at: {path} (fill vrmBlendShape to override built-in/automatic mapping).");
             }
             catch (Exception e)
             {
